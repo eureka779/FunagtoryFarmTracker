@@ -640,7 +640,7 @@ function deductSpawn(sb){const l=db.spawn.find(x=>x.id===sb.lotId);if(l&&l.bagWe
 function spawnStage(id,s){const b=db.spawnBags[id];if(b.stage===s)return;b.stage=s;b.stageHist.push({stage:s,t:Date.now(),op:op()});if(s==='Contaminated')deductSpawn(b);audit(`Spawn ${id} → ${s}`);save();ok();toast(`${id} → ${s}`);renderHome()}
 function spawnLotBags(lot){const bs=Object.values(db.spawnBags).filter(b=>b.lotId===lot);if(!bs.length)return '—';const c={};bs.forEach(b=>c[b.stage]=(c[b.stage]||0)+1);return SPAWN_STAGES.filter(x=>c[x]).map(x=>`${c[x]} ${x.toLowerCase()}`).join(', ')}
 function spawnLabel(id){const b=db.spawnBags[id],l=db.spawn.find(x=>x.id===b.lotId)||{};
-  return {code:id,title:id,lines:[{t:'SPAWN',s:0.16,b:true},{t:[l.species,l.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(l.date)),s:0.085}]}}
+  return {code:id,title:id,lines:[{t:'SPAWN',s:0.12,b:true},{t:[l.species,l.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(l.date)),s:0.085}]}}
 function printSpawn(ids){ids=ids.filter(i=>db.spawnBags[i]);ids.forEach(i=>db.spawnBags[i].labelPrints=(db.spawnBags[i].labelPrints||0)+1);save();printItems(ids.map(spawnLabel))}
 /* ================= strains & genetics ================= */
 const strainName=x=>x?`${x.species}${x.strain?' — '+x.strain:''}`:'';
