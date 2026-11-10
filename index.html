@@ -65,6 +65,16 @@ dialog::backdrop{background:#0006}
 .label{border:1px dashed var(--line);border-radius:6px;display:flex;gap:2mm;align-items:center;background:#fff;color:#000;overflow:hidden}
 .label .qr{flex:none}.label b{font-size:14px;display:block;line-height:1.1}.label small{font-size:10px;display:block;line-height:1.2}
 #printZone{display:none}
+.kbd{display:inline-block;min-width:1.45em;padding:0 .35em;margin-right:.55em;border-radius:5px;background:rgba(255,255,255,.28);font-size:.72em;font-weight:700;line-height:1.55;vertical-align:.12em;text-align:center}
+.btn.alt .kbd{background:rgba(0,0,0,.09)}@media (prefers-color-scheme:dark){.btn.alt .kbd{background:rgba(255,255,255,.14)}}
+.btn.hk-flash{outline:3px solid var(--acc2);outline-offset:2px}
+kbd{font:600 12px/1.4 ui-monospace,Menlo,Consolas,monospace;background:var(--chip);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px}
+#keybar{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -2px 8px #0001;padding:6px 16px;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center;font-size:12.5px;color:var(--muted)}
+#keybar .k{white-space:nowrap}#keybar .k kbd{margin-right:5px}#keybar .sep{width:1px;height:16px;background:var(--line)}
+#keybar .x{margin-left:auto;cursor:pointer;background:none;border:0;color:var(--muted);font:inherit}
+body.kb main{padding-bottom:70px}body.kb #toast{bottom:58px}
+#keybarShow{position:fixed;right:12px;bottom:12px;z-index:6}
+@media (pointer:coarse){.kbd,.hk-hint,#keybar,#keybarShow{display:none!important}body.kb main{padding-bottom:40px}body.kb #toast{bottom:18px}}
 a{color:var(--acc)}
 header{background:#00694b;border-bottom:0;color:#fff;box-shadow:0 1px 6px #0003}
 header nav button{color:rgba(255,255,255,.78)}header nav button.on{background:rgba(255,255,255,.2);color:#fff}
@@ -110,6 +120,7 @@ header .badge{background:#ffcf5c;color:#3a2a00}
 <dialog id="dlg"></dialog>
 <div id="toast"></div>
 <div id="printZone"></div>
+<div id="keybar" style="display:none"></div><button id="keybarShow" class="chip" style="display:none" onclick="setKeybar(true)" title="Show the key guide">⌨ Keys</button>
 
 <script>
 /* ================= core ================= */
@@ -520,7 +531,7 @@ function idleCard(){
     <p class="small muted" style="margin-top:16px">${inc} incubating · ${fr} fruiting or resting</p>`}
   else if(ROLE==='harvest')inner=head('⚖️','Scan a block','Then set the mushrooms on the scale — it saves by itself.')+tot;
   else inner=head('🍄','Scan a block','Or a spawn bag. Whatever it needs next shows up here.')+adds+'<p class="small muted" style="margin-top:14px">Tip: scan a spawn bag to start a new batch from it.</p>'+tot;
-  return `<div class="card" style="text-align:center;padding:44px 16px">${inner}</div>`;
+  return `<div class="card" style="text-align:center;padding:44px 16px">${inner}<p class="small muted hk-hint" style="margin:18px 0 0">⌨ Press <kbd>?</kbd> for keyboard shortcuts</p></div>`;
 }
 function renderHome(){
   if(mode.type!=='stage'&&mode.type!=='loc')mode={type:station.block?'harvest':'lookup'};station.batch=null;
@@ -1469,6 +1480,72 @@ function importSensors(f){if(!f)return;f.text().then(t=>{const lines=t.trim().sp
   const has=ix('timestamp')>=0;(has?lines.slice(1):lines).forEach(l=>{const c=l.split(',').map(s=>s.trim().replace(/^"|"$/g,'')),g=(k,i)=>c[has?ix(k):i];const ts=Date.parse(g('timestamp',0));
     const v=parseFloat(g('value',4));db.sensorReadings.push({t:ts,sensor:g('sensor_id',1),zone:g('zone',2),m:g('measurement',3),v,u:g('unit',5)||'',q:isNaN(ts)||isNaN(v)?'invalid':(g('quality',6)||'ok').toLowerCase()});n++});
   db.sensorReadings.sort((a,c)=>a.t-c.t);save();renderSettings();toast(`Imported ${n} readings`)}).catch(()=>toast('Could not read that CSV'))}
+
+/* ================= keyboard shortcuts =================
+   Number keys press the numbered big buttons on screen. Letters open common actions.
+   The barcode scanner also "types", very fast — key bursts are ignored so scans never trigger shortcuts. */
+let hkTimer=null,hkLast=0,hkBurst=0;
+function hkScope(){return $('dlg').open?$('dlg'):document.querySelector('section.on')}
+function hkButtons(){const sc=hkScope();return sc?[...sc.querySelectorAll('.btn.xl')].filter(b=>b.offsetParent!==null&&!b.disabled).slice(0,9):[]}
+let KEYBAR=true;try{KEYBAR=localStorage.getItem('fungatory-keybar')!=='0'}catch(e){}
+function setKeybar(v){KEYBAR=v;try{localStorage.setItem('fungatory-keybar',v?'1':'0')}catch(e){}markHotkeys()}
+function markHotkeys(){
+  document.querySelectorAll('.kbd').forEach(k=>k.remove());const bs=hkButtons();bs.forEach((b,i)=>{const k=document.createElement('span');k.className='kbd';k.textContent=i+1;b.prepend(k)});
+  const bar=$('keybar'),show=$('keybarShow');if(!bar)return;document.body.classList.toggle('kb',KEYBAR);
+  bar.style.display=KEYBAR?'flex':'none';show.style.display=KEYBAR?'none':'';if(!KEYBAR)return;
+  const k=(key,txt)=>`<span class="k"><kbd>${key}</kbd>${esc(txt)}</span>`,dlgOpen=$('dlg').open;
+  const nums=bs.map((b,i)=>k(i+1,b.textContent.replace(/^\d/,'').replace(/·.*$/,'').trim().slice(0,28)));
+  const ctx=dlgOpen?[k('Enter','Save'),k('Esc','Close')]
+    :[station.block||station.spawn||station.culture?k('Esc','Done'):'',k('/','Type an ID'),
+      can('lab')?k('B','Batch')+k('S','Spawn')+k('L','LC'):'',can('prep')&&ROLE!=='all'?k('R','Start run'):'',
+      can('harvest')&&$('wt')?k('T','Tare'):'',k('A','Activity'),k('M','Room')].filter(Boolean);
+  bar.innerHTML=`<b style="color:var(--ink)">⌨</b>${nums.length?nums.join('')+'<span class="sep"></span>':''}${ctx.join('')}<span class="k"><kbd>?</kbd>All keys</span><button class="x" onclick="setKeybar(false)" title="Hide the key guide">Hide ✕</button>`;
+}
+const hkLater=()=>setTimeout(markHotkeys,0);
+['render','renderHome','dlg','closeDlg','renderPrep','renderTasks'].forEach(n=>{const f=window[n];if(typeof f==='function')window[n]=function(){const r=f.apply(this,arguments);hkLater();return r}});
+$('dlg').addEventListener('close',hkLater);
+function hkPress(b){b.classList.add('hk-flash');setTimeout(()=>b.classList.remove('hk-flash'),250);b.click()}
+const HK=[
+  ['1 – 9','Press the numbered button on screen',()=>true],
+  ['Enter','Save the form you are typing in',()=>true],
+  ['Esc','Close a window / go back to the scan screen',()=>true],
+  ['/','Jump to the scan box (type an ID)',()=>true],
+  ['B','Add batch',()=>can('lab')],['S','Add spawn',()=>can('lab')],['L','Add LC (liquid culture)',()=>can('lab')],
+  ['R','Start a sterilize / pasteurize run',()=>can('prep')],['P','Printer setup',()=>can('lab')],
+  ['T','Tare the scale',()=>can('harvest')],['A','Activity log',()=>true],['W','Who is using this device',()=>true],
+  ['M','Change this device\'s room',()=>true],['H','Home',()=>true],['?','Show this list',()=>true]];
+function hkHelp(){dlg(`<h3 style="margin-top:0">⌨ Keyboard shortcuts</h3><table>${HK.filter(h=>h[2]()).map(([k,d])=>`<tr><td style="width:90px"><kbd>${k}</kbd></td><td>${d}</td></tr>`).join('')}</table>
+  <p class="small muted">Shortcuts don't fire while you're typing in a box, and scanner input is never mistaken for a shortcut.</p><div class="row"><button class="btn alt" onclick="closeDlg()">Close</button></div>`)}
+function goHome(){station.block=null;station.spawn=null;station.culture=null;station.decision=false;station.finishing=false;show('home')}
+function runHotkey(k){
+  if(/^[1-9]$/.test(k)){const b=hkButtons()[+k-1];if(b)hkPress(b);return}
+  if($('dlg').open)return;const K=k.toLowerCase();
+  if(k==='?')return hkHelp();
+  if(K==='/'){$('scanbox').focus();return}
+  if(K==='b'&&can('lab'))return openNewBatch();
+  if(K==='s'&&can('lab'))return openNewSpawn();
+  if(K==='l'&&can('lab'))return openNewCulture();
+  if(K==='r'&&can('prep'))return openNewCycle();
+  if(K==='p'&&can('lab'))return printerSetup();
+  if(K==='t'&&can('harvest')&&tab==='home'&&$('wt')){scale.tare=scale.raw||0;renderHome();return toast('Scale tared')}
+  if(K==='a')return activityDialog();
+  if(K==='w')return whoDialog();
+  if(K==='m')return chooseRole();
+  if(K==='h')return goHome();
+}
+document.addEventListener('keydown',e=>{
+  if(e.ctrlKey||e.metaKey||e.altKey)return;
+  const el=e.target,typing=/INPUT|TEXTAREA|SELECT/.test(el.tagName),now=performance.now();
+  if(typing){
+    if(e.key==='Enter'&&el.tagName==='INPUT'&&el.id!=='scanbox'&&el.closest('#dlg')){const b=$('dlg').querySelector('.act .btn.xl')||$('dlg').querySelector('.btn.green');if(b&&!/^ic_|^newOp$/.test(el.id)){e.preventDefault();hkPress(b)}}
+    if(e.key==='Escape'&&!el.closest('#dlg'))el.blur();
+    return}
+  if(now-hkLast<80)hkBurst=now+250;hkLast=now;
+  if(now<hkBurst){clearTimeout(hkTimer);hkTimer=null;return}
+  if(e.key==='Escape'){if(!$('dlg').open&&tab==='home')goHome();return}
+  if(e.key.length!==1)return;
+  const k=e.key;clearTimeout(hkTimer);hkTimer=setTimeout(()=>{hkTimer=null;if(performance.now()<hkBurst)return;runHotkey(k)},90);
+},true);
 
 seedStrains();render();syncStart();
 </script>
