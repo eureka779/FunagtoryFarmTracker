@@ -136,7 +136,7 @@ const pct=x=>x==null||isNaN(x)?'—':Math.round(x)+'%';
 const sum=a=>a.reduce((x,y)=>x+y,0);
 
 function blank(){return {v:2,settings:{unit:'lb',labelW:50,labelH:30,operators:['Trace'],op:'Trace',rooms:['Lab','Incubation','Fruiting'],nextBatch:1,bagIncluded:true,bagWeight:0,autoStart:true,autoHarvest:true,autoPrint:true,captureMin:200,rearm:30,stableTol:5,stableMs:1000,buffer:10,capInoc:100,horizon:12,useMeasured:true},
-  strains:[],cultures:[],cultureJars:{},cycles:[],spawn:[],spawnBags:{},recipes:[],batches:{},blocks:{},harvests:[],targets:{},lead:{},orders:[],tasks:[],snapshots:{},sensorReadings:[],log:[]}}
+  strains:[],cultures:[],cultureJars:{},cycles:[],probe:{},spawn:[],spawnBags:{},recipes:[],batches:{},blocks:{},harvests:[],targets:{},lead:{},orders:[],tasks:[],snapshots:{},sensorReadings:[],log:[]}}
 let db=load();db.log.forEach((l,i)=>{if(!l.id)l.id='l'+hashStr(l.t+'|'+l.msg+'|'+i)});
 function load(){
   try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.blocks){const b=blank();const out=Object.assign(b,d);out.settings=Object.assign(blank().settings,d.settings||{});return out}}catch(e){}
@@ -165,7 +165,7 @@ function save(){try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){toast(
    server last had, pushes only records it changed, and pulls other devices' changes every few seconds.
    Works offline: unsent changes stay in this browser and go up when the server is reachable again. */
 const SYNC={on:false,ver:0,shadow:{},busy:false,again:false,t:null,key:'',state:'',first:false,dirty:false};
-const S_MAPS=['batches','blocks','spawnBags','cultureJars','targets','lead','snapshots'],S_LISTS=['harvests','tasks','orders','spawn','cultures','strains','recipes','log','cycles'];
+const S_MAPS=['batches','blocks','spawnBags','cultureJars','probe','targets','lead','snapshots'],S_LISTS=['harvests','tasks','orders','spawn','cultures','strains','recipes','log','cycles'];
 function flatten(d){const r={};S_MAPS.forEach(c=>Object.entries(d[c]||{}).forEach(([k,v])=>{r[c+'/'+k]=v}));
   S_LISTS.forEach(c=>(d[c]||[]).forEach(v=>{if(v&&v.id!=null)r[c+'/'+v.id]=v}));
   const st=Object.assign({},d.settings);delete st.op;r['_/settings']=st;r['_/sensorReadings']=d.sensorReadings||[];return r}
@@ -1088,8 +1088,14 @@ const fT=c=>c==null||isNaN(c)?'—':Math.round(cToD(c))+'°'+tU();
 const fDur=m=>m==null?'—':m>=60?`${Math.floor(m/60)}h ${Math.round(m%60)}m`:`${Math.round(m)}m`;
 let PREP={sel:null};
 function cycleTag(c){return `#${c.num} ${c.type}`}
+/* readings for a run = its own (CSV / manual / Bluetooth) plus the ITC-308 readings the server collected during its times */
+const useProbe=()=>db.settings.probeType==='tuya'||(db.settings.probeType!=='ble'&&Object.keys(db.probe||{}).length>0);
+function probeBetween(t0,t1){const out=[];Object.entries(db.probe||{}).forEach(([day,arr])=>{if(!Array.isArray(arr))return;const d=pdate(day);if(d&&(d+2*DAY<t0||d-DAY>t1))return;arr.forEach(x=>{if(x[0]>=t0&&x[0]<=t1)out.push([x[0],x[1],'itc308'])})});return out}
+function probeLatest(){let best=null;Object.values(db.probe||{}).forEach(arr=>{if(Array.isArray(arr)&&arr.length){const x=arr[arr.length-1];if(!best||x[0]>best[0])best=x}});return best}
+function cycleReadings(c){const own=(c.readings||[]).slice();if(!useProbe())return own.sort((a,b)=>a[0]-b[0]);
+  const base=own.slice(),near=t=>base.some(r=>Math.abs(r[0]-t)<45e3);probeBetween(c.start-2*6e4,(c.end||Date.now())+2*6e4).forEach(x=>{if(!near(x[0]))own.push(x)});return own.sort((a,b)=>a[0]-b[0])}
 function cycleStats(c){
-  const r=(c.readings||[]).slice().sort((a,b)=>a[0]-b[0]),T=+c.target;let best=0,cur=0,total=0,max=null,min=null;
+  const r=cycleReadings(c),T=+c.target;let best=0,cur=0,total=0,max=null,min=null;
   const gaps=r.slice(1).map((x,i)=>(x[0]-r[i][0])/6e4).sort((a,b)=>a-b),allow=Math.max(15,(gaps[Math.floor(gaps.length/2)]||0)*2.5);
   for(let i=0;i<r.length;i++){const v=r[i][1];if(v!=null){max=max==null?v:Math.max(max,v);min=min==null?v:Math.min(min,v)}
     if(i>0){const gap=(r[i][0]-r[i-1][0])/6e4;if(r[i][1]>=T&&r[i-1][1]>=T&&gap<=allow){cur+=gap;total+=gap;best=Math.max(best,cur)}else cur=0}}
@@ -1106,16 +1112,18 @@ function openNewCycle(type){
   <div class="chips">${Object.keys(CYCLE_TYPES).map(k=>`<button class="chip ${k===type?'on':''}" onclick="openNewCycle('${k}')">${k==='Pasteurize'?'♨️':'🧪'} ${k}</button>`).join('')}</div>
   <label>Method<select id="cy_m">${T.methods.map(m=>`<option ${m===(d.method||T.methods[0])?'selected':''}>${m}</option>`).join('')}</select></label>
   <div class="two"><label>Fruiting blocks going in<input id="cy_b" type="number" min="0" value="${d.blocks??(type==='Pasteurize'?20:0)}"></label><label>Spawn bags going in<input id="cy_s" type="number" min="0" value="${d.spawn??(type==='Sterilize'?10:0)}"></label>
-  <label>Target temperature (°${tU()})<input id="cy_t" type="number" step="any" value="${Math.round(cToD(d.target??T.target))}"></label><label>Hold for (minutes)<input id="cy_h" type="number" min="1" value="${d.hold??T.hold}"></label></div>
+  ${type==='Sterilize'?`<label>Cycle length (minutes)<input id="cy_h" type="number" min="1" value="${d.hold??T.hold}"></label>`
+   :`<label>Target temperature (°${tU()})<input id="cy_t" type="number" step="any" value="${Math.round(cToD(d.target??T.target))}"></label><label>Hold for (minutes)<input id="cy_h" type="number" min="1" value="${d.hold??T.hold}"></label>`}</div>
+  ${type==='Sterilize'?'<p class="small muted" style="margin:4px 0">Sterilization runs are logged without temperature data — just what went in, how long it ran, and who ran it.</p>':''}
   <label>Substrate / grain<input id="cy_sub" placeholder="e.g. Masters mix, rye" value="${esc(d.sub||'')}"></label>
   <label>Notes<input id="cy_no" placeholder="optional"></label>
   <div class="act"><button class="btn xl green" onclick="createCycle('${type}')">Start run</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`);
 }
 function createCycle(type){
   const b=+$('cy_b').value||0,sp=+$('cy_s').value||0;if(!b&&!sp)return toast('Enter how many blocks or spawn bags');
-  const num=+db.settings.nextCycle||1,target=Math.round(dToC(+$('cy_t').value)*10)/10,hold=+$('cy_h').value||60,method=$('cy_m').value,sub=$('cy_sub').value.trim();
-  const c={id:uid(),num,type,method,blocks:b,spawn:sp,sub,target,hold,start:Date.now(),end:null,status:'Running',readings:[],op:op(),notes:$('cy_no').value,created:Date.now()};
-  db.cycles.push(c);db.settings.nextCycle=num+1;db.settings.lastCycleType=type;db.settings.prepDefaults=db.settings.prepDefaults||{};db.settings.prepDefaults[type]={method,blocks:b,spawn:sp,target,hold,sub};
+  const num=+db.settings.nextCycle||1,target=$('cy_t')?Math.round(dToC(+$('cy_t').value)*10)/10:null,hold=+$('cy_h').value||60,method=$('cy_m').value,sub=$('cy_sub').value.trim();
+  const c={id:uid(),num,type,method,blocks:b,spawn:sp,sub,target,hold,noTemp:type==='Sterilize',start:Date.now(),end:null,status:'Running',readings:[],op:op(),notes:$('cy_no').value,created:Date.now()};
+  db.cycles.push(c);db.settings.nextCycle=num+1;db.settings.lastCycleType=type;db.settings.prepDefaults=db.settings.prepDefaults||{};db.settings.prepDefaults[type]={method,blocks:b,spawn:sp,target:target??undefined,hold,sub};
   audit(`Started ${type.toLowerCase()} run #${num} (${[b&&b+' blocks',sp&&sp+' spawn bags'].filter(Boolean).join(', ')}, ${method})`);save();closeDlg();PREP.sel=c.id;
   if(INK.dev&&INK.dev.gatt.connected)INK.cycleId=c.id;prepRefresh(true);
 }
@@ -1124,30 +1132,42 @@ function addReading(id){const c=db.cycles.find(x=>x.id===id),v=prompt(`Temperatu
 function finishCycle(id,status){const c=db.cycles.find(x=>x.id===id),st=cycleStats(c);
   status=status||(st.n?(st.ok?'Passed':'Failed'):'Done');
   if(!c.end)c.end=Date.now();c.status=status;if(INK.cycleId===id)INK.cycleId=null;
-  audit(`Finished ${c.type.toLowerCase()} run #${c.num}: ${status}${st.n?` (held ≥${fT(c.target)} for ${fDur(st.held)} of ${fDur(c.hold)})`:''}`);save();toast(`Run #${c.num}: ${status}`);prepRefresh(true)}
+  audit(`Finished ${c.type.toLowerCase()} run #${c.num}: ${status}${st.n&&!c.noTemp?` (held ≥${fT(c.target)} for ${fDur(st.held)} of ${fDur(c.hold)})`:''}`);save();toast(`Run #${c.num}: ${status}`);prepRefresh(true)}
 function delCycle(id){const c=db.cycles.find(x=>x.id===id);if(!c||!confirm(`Delete run #${c.num}? Batches linked to it keep their records.`))return;db.cycles=db.cycles.filter(x=>x.id!==id);if(PREP.sel===id)PREP.sel=null;audit(`Deleted run #${c.num}`);save();prepRefresh(true)}
 function prepRefresh(force){const a=document.activeElement;if(!force&&($('dlg').open||(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&a.id!=='scanbox')))return;
   if(tab==='prep')renderPrep();else if(tab==='home'&&ROLE==='prep'&&!station.block&&!station.spawn&&!station.culture)renderHome()}
 function renderPrep(){$('prep').innerHTML=prepView();drawPrepChart()}
-function cycleCard(c){
-  const st=cycleStats(c),run=c.status==='Running',pctv=Math.min(100,st.held/(+c.hold||1)*100),live=INK.cycleId===c.id&&INK.dev&&INK.dev.gatt.connected;
+function simpleCycleCard(c){
+  const run=c.status==='Running',mins=((c.end||Date.now())-c.start)/6e4,pctv=Math.min(100,mins/(+c.hold||1)*100);
+  return `<div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:flex-start"><div><div class="bigid">🧪 Run #${c.num}</div>
+    <div class="muted">${c.type} · ${esc(c.method)} · ${[c.blocks&&c.blocks+' fruiting blocks',c.spawn&&c.spawn+' spawn bags'].filter(Boolean).join(' + ')}${c.sub?' · '+esc(c.sub):''}</div></div>
+    <span class="pill ${c.status==='Failed'?'r':run?'a':'g'}">${c.status}</span></div>
+   <div class="small muted" style="margin:6px 0 10px">Started ${fmtDate(c.start)} by ${esc(c.op)}${c.end?' · finished '+fmtDate(c.end):''}${c.notes?' · '+esc(c.notes):''}</div>
+   <div class="grid"><div class="stat"><b>${fDur(mins)}</b><span>${run?'running':'total time'}</span></div><div class="stat"><b>${fDur(+c.hold)}</b><span>planned cycle length</span></div></div>
+   ${run?`<div style="height:10px;background:var(--chip);border-radius:6px;margin:10px 0;overflow:hidden"><div style="height:100%;width:${pctv}%;background:${pctv>=100?'var(--acc2)':'var(--acc)'}"></div></div>
+     ${pctv>=100?'<div class="alert ok">✓ Cycle time reached.</div>':''}`:''}
+   <div class="row">${run?`<button class="btn green" onclick="finishCycle('${c.id}','Done')">Finish run</button><button class="chip" onclick="finishCycle('${c.id}','Failed')">Mark failed</button>`
+     :`<button class="chip" onclick="finishCycle('${c.id}','${c.status==='Failed'?'Done':'Failed'}')">${c.status==='Failed'?'Mark done':'Mark failed'}</button>`}<button class="chip" onclick="delCycle('${c.id}')">Delete</button></div></div>`;
+}
+function cycleCard(c){if(c.noTemp||(c.type==='Sterilize'&&!(c.readings||[]).length))return simpleCycleCard(c);
+  const ble=db.settings.probeType==='ble',auto=useProbe(),pl=auto&&probeLatest(),fresh=pl&&Date.now()-pl[0]<5*6e4,st=cycleStats(c),run=c.status==='Running',pctv=Math.min(100,st.held/(+c.hold||1)*100),live=INK.cycleId===c.id&&INK.dev&&INK.dev.gatt.connected;
   const dur=fDur(((c.end||Date.now())-c.start)/6e4);
   return `<div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:flex-start"><div><div class="bigid">${c.type==='Pasteurize'?'♨️':'🧪'} Run #${c.num}</div>
     <div class="muted">${c.type} · ${esc(c.method)} · ${[c.blocks&&c.blocks+' fruiting blocks',c.spawn&&c.spawn+' spawn bags'].filter(Boolean).join(' + ')}${c.sub?' · '+esc(c.sub):''}</div></div>
     <span class="pill ${c.status==='Passed'?'g':c.status==='Failed'?'r':run?'a':''}">${c.status}</span></div>
    <div class="small muted" style="margin:6px 0 10px">Started ${fmtDate(c.start)} by ${esc(c.op)} · ${run?'running '+dur:'took '+dur} · target ${fT(c.target)} for ${fDur(c.hold)}</div>
-   <div class="grid"><div class="stat"><b id="liveTemp">${live&&INK.temp!=null?fT(INK.temp):fT(st.last)}</b><span>${live?'live from Inkbird':st.lastT?'last reading '+fmtDate(st.lastT):'no readings yet'}</span></div>
+   <div class="grid"><div class="stat"><b id="liveTemp">${live&&INK.temp!=null?fT(INK.temp):run&&fresh?fT(pl[1]):fT(st.last)}</b><span>${live?'live from Inkbird':run&&fresh?`live from ITC-308 · ${Math.max(0,Math.round((Date.now()-pl[0])/6e4))} min ago`:st.lastT?'last reading '+fmtDate(st.lastT):'no readings yet'}</span></div>
     <div class="stat"><b class="${st.ok?'good':''}">${fDur(st.held)}</b><span>held at or above ${fT(c.target)} (need ${fDur(c.hold)})</span></div>
     <div class="stat"><b>${fT(st.max)}</b><span>highest</span></div><div class="stat"><b>${st.n}</b><span>readings</span></div></div>
    <div style="height:10px;background:var(--chip);border-radius:6px;margin:10px 0;overflow:hidden"><div style="height:100%;width:${pctv}%;background:${st.ok?'var(--acc2)':'var(--acc)'}"></div></div>
    ${st.ok&&run?`<div class="alert ok">✓ Held long enough — this run can be finished as <b>Passed</b>.</div>`:''}
    <div id="prepChart" data-id="${c.id}" style="width:100%"></div>
-   <div class="row">${run?`<button class="btn ${live?'alt':''}" onclick="inkConnect('${c.id}')">${live?'🌡 Inkbird connected':'🌡 Connect Inkbird'}</button><button class="btn alt" onclick="addReading('${c.id}')">+ Add reading</button>`:''}
-    <label class="btn alt" style="margin:0;color:var(--ink)">Import Inkbird CSV<input type="file" accept=".csv,.txt,text/csv" style="display:none" onchange="importInkCSV('${c.id}',this.files[0])"></label>
-    ${run?`<button class="btn green" onclick="finishCycle('${c.id}')">Finish run</button>`:`<button class="chip" onclick="finishCycle('${c.id}','Passed')">Mark passed</button><button class="chip" onclick="finishCycle('${c.id}','Failed')">Mark failed</button>`}
+   <div class="row">${run&&ble?`<button class="btn ${live?'alt':''}" onclick="inkConnect('${c.id}')">${live?'🌡 Inkbird connected':'🌡 Connect Inkbird'}</button>`:''}
+    <label class="btn ${ble||auto?'alt':''}" style="margin:0;${ble||auto?'color:var(--ink)':''}">${ble?'Import Inkbird CSV':auto?'Import CSV (backup)':'📥 Import ITC-308 CSV'}<input type="file" accept=".csv,.txt,text/csv" style="display:none" onchange="importInkCSV('${c.id}',this.files[0])"></label>
+    ${run?`<button class="btn alt" onclick="addReading('${c.id}')">+ Add reading</button><button class="btn green" onclick="finishCycle('${c.id}')">Finish run</button>`:`<button class="chip" onclick="finishCycle('${c.id}','Passed')">Mark passed</button><button class="chip" onclick="finishCycle('${c.id}','Failed')">Mark failed</button>`}
     <button class="chip" onclick="delCycle('${c.id}')">Delete</button></div>
    ${live&&INK.temps&&INK.temps.filter(x=>x!=null).length>1?`<div class="row small"><span class="muted">Recording probe</span>${INK.temps.map((t,i)=>t==null?'':`<button class="chip ${INK.probe===i?'on':''}" onclick="INK.probe=${i};prepRefresh(true)">P${i+1}: ${fT(t)}</button>`).join('')}</div>`:''}
-   ${run&&!live?'<p class="small muted">Keep this page open while it runs if the Inkbird is connected — readings are saved every 30 seconds. You can also import the Inkbird app\'s CSV export afterwards.</p>':''}</div>`;
+   ${run&&!live&&auto?`<p class="small muted">${fresh?'Temperatures come in automatically from the ITC-308 every minute — nothing to do. Tap <b>Finish run</b> when it\'s done.':`<span class="bad">No recent ITC-308 readings${pl?` (last ${fmtDate(pl[0])})`:''}.</span> Check the controller is online, or see Settings → Data → Temperature probe.`}</p>`:run&&!live?(ble?'<p class="small muted">Keep this page open while it runs if the Inkbird is connected — readings are saved every 30 seconds. You can also import the Inkbird app\'s CSV export afterwards.</p>':'<p class="small muted">When the run is done: in the Inkbird app open the ITC-308, export the history as CSV, then tap <b>Import ITC-308 CSV</b>. The run\'s times, graph and pass/fail fill in from the file.</p>'):''}</div>`;
 }
 function prepView(){
   const sorted=db.cycles.slice().sort((a,b)=>b.start-a.start),running=sorted.filter(c=>c.status==='Running');
@@ -1155,14 +1175,15 @@ function prepView(){
   const wk=sorted.filter(c=>c.start>=weekStart(Date.now()));
   return `<div class="row" style="justify-content:space-between"><div class="row" style="margin:0"><button class="btn xl green" style="width:auto" onclick="openNewCycle()">+ Start a run</button>
      ${running.length>1?running.map(c=>`<button class="chip ${c===cur?'on':''}" onclick="PREP.sel='${c.id}';prepRefresh(true)">Run #${c.num} running</button>`).join(''):''}</div>
-     <span class="small muted">This week: <b>${sum(wk.map(c=>+c.blocks||0))}</b> blocks · <b>${sum(wk.map(c=>+c.spawn||0))}</b> spawn bags · <button class="chip" onclick="db.settings.tempUnit=tU()==='F'?'C':'F';save();prepRefresh(true)">°${tU()}</button></span></div>
+     <span class="small muted">This week: <b>${sum(wk.map(c=>+c.blocks||0))}</b> blocks · <b>${sum(wk.map(c=>+c.spawn||0))}</b> spawn bags · <button class="chip" onclick="db.settings.tempUnit=tU()==='F'?'C':'F';save();prepRefresh(true)">°${tU()}</button>
+     <select style="padding:3px 6px;font-size:12px" onchange="db.settings.probeType=this.value;save();prepRefresh(true)"><option value="tuya" ${useProbe()?'selected':''}>ITC-308 WiFi — automatic</option><option value="itc308" ${!useProbe()&&db.settings.probeType!=='ble'?'selected':''}>ITC-308 WiFi — CSV import</option><option value="ble" ${db.settings.probeType==='ble'?'selected':''}>Inkbird Bluetooth (IBT)</option></select></span></div>
    ${cur?cycleCard(cur):`<div class="card" style="text-align:center;padding:40px 16px"><div style="font-size:46px">🔥</div><div style="font-size:22px;font-weight:700;margin:8px 0">No run in progress</div><p class="muted">Start a run when blocks or spawn go into the pasteurizer or pressure cooker.</p></div>`}
-   <div class="card"><b>Recent runs</b><div class="scroll"><table><tr><th>Run</th><th>Date</th><th>Contents</th><th class="n">Held</th><th>Result</th><th>By</th></tr>
-   ${sorted.slice(0,25).map(c=>{const st=cycleStats(c);return `<tr class="click" onclick="PREP.sel='${c.id}';prepRefresh(true);scrollTo(0,0)"><td><b>${esc(cycleTag(c))}</b><div class="small muted">${esc(c.method)}</div></td><td>${fmtDay(c.start)}</td><td>${[c.blocks&&c.blocks+' blocks',c.spawn&&c.spawn+' spawn'].filter(Boolean).join(', ')}</td><td class="n">${st.n?fDur(st.held)+' / '+fDur(c.hold):'—'}</td><td><span class="tag ${c.status==='Passed'?'m':''}" style="${c.status==='Failed'?'background:var(--warn);color:#fff':''}">${c.status}</span></td><td>${esc(c.op)}</td></tr>`}).join('')||'<tr><td colspan="6" class="muted">No runs yet.</td></tr>'}</table></div></div>`;
+   <div class="card"><b>Recent runs</b><div class="scroll"><table><tr><th>Run</th><th>Date</th><th>Contents</th><th class="n">Held / time</th><th>Result</th><th>By</th></tr>
+   ${sorted.slice(0,25).map(c=>{const st=cycleStats(c);return `<tr class="click" onclick="PREP.sel='${c.id}';prepRefresh(true);scrollTo(0,0)"><td><b>${esc(cycleTag(c))}</b><div class="small muted">${esc(c.method)}</div></td><td>${fmtDay(c.start)}</td><td>${[c.blocks&&c.blocks+' blocks',c.spawn&&c.spawn+' spawn'].filter(Boolean).join(', ')}</td><td class="n">${c.noTemp||c.type==='Sterilize'?(c.end?fDur((c.end-c.start)/6e4)+' run':'—'):st.n?fDur(st.held)+' / '+fDur(c.hold):'—'}</td><td><span class="tag ${c.status==='Passed'?'m':''}" style="${c.status==='Failed'?'background:var(--warn);color:#fff':''}">${c.status}</span></td><td>${esc(c.op)}</td></tr>`}).join('')||'<tr><td colspan="6" class="muted">No runs yet.</td></tr>'}</table></div></div>`;
 }
 function drawPrepChart(){
   const el=$('prepChart');if(!el)return;const c=db.cycles.find(x=>x.id===el.dataset.id);if(!c)return;
-  const r=(c.readings||[]).filter(x=>x[1]!=null).slice().sort((a,b)=>a[0]-b[0]);
+  const r=cycleReadings(c).filter(x=>x[1]!=null);
   if(r.length<2){el.innerHTML=`<div class="small muted" style="padding:20px 0;text-align:center">The temperature graph appears after two readings.</div>`;return}
   const W=640,H=230,L=46,R=12,T=12,B=28,t0=r[0][0],t1=Math.max(r[r.length-1][0],t0+6e4),vals=r.map(x=>cToD(x[1])),tgt=cToD(+c.target);
   let lo=Math.min(...vals,tgt),hi=Math.max(...vals,tgt);const pad=Math.max(4,(hi-lo)*0.08);lo=Math.floor((lo-pad)/5)*5;hi=Math.ceil((hi+pad)/5)*5;
@@ -1407,7 +1428,15 @@ function renderLabels(){
 /* ================= settings & data ================= */
 function chk(k,l){return `<label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" style="width:auto" ${db.settings[k]?'checked':''} onchange="db.settings.${k}=this.checked;save()"> ${l}</label>`}
 function num(k,l,step){return `<label>${l}<input type="number" step="${step||'any'}" value="${db.settings[k]}" onchange="db.settings.${k}=+this.value;save()"></label>`}
-function renderSettings(){
+async function probeCheck(test){
+  const el=$('probeStat');if(!el)return;if(!SYNC.on){el.textContent='Only available when Fungatory is opened from your server.';return}
+  try{const r=await fetch('api/probe/'+(test?'test':'status'),{headers:{'X-Farm-Key':SYNC.key||''},cache:'no-store'});const j=await r.json();
+    if(test){const pre=$('probeTest');pre.style.display='';pre.textContent=JSON.stringify(j,null,1)}
+    const s=test?await (await fetch('api/probe/status',{headers:{'X-Farm-Key':SYNC.key||''},cache:'no-store'})).json():j;
+    el.innerHTML=!s.configured?'Not set up on the server yet — add the TUYA_ settings to the server (see setup steps).':s.error?`<span class="bad">Error: ${esc(s.error)}</span>`:s.last?`<span class="good">Working</span> — last reading ${fT(s.last.c)} at ${fmtDate(s.last.t)} (from “${esc(s.last.code)}”, raw ${esc(s.last.raw)} ÷ 10^${s.last.scale}, °${esc(s.last.unit)}) · every ${s.every}s`:'Set up — waiting for the first reading…';
+  }catch(e){el.textContent='Server is running an older version without probe support.'}
+}
+function renderSettings(){setTimeout(()=>probeCheck(false),0);
   $('settings').innerHTML=`<div class="card"><b>Operators &amp; locations</b><div class="two">
    <label>Operators (comma separated)<input value="${esc(db.settings.operators.join(', '))}" onchange="db.settings.operators=this.value.split(',').map(s=>s.trim()).filter(Boolean);if(!db.settings.operators.includes(db.settings.op))db.settings.op=db.settings.operators[0]||'';save();render()"></label>
    <label>Rooms (comma separated)<input value="${esc(db.settings.rooms.join(', '))}" onchange="db.settings.rooms=this.value.split(',').map(s=>s.trim()).filter(Boolean);save()"></label></div></div>
@@ -1424,6 +1453,8 @@ function renderSettings(){
    <button class="btn alt" onclick="exportHarvests()">Harvests CSV</button><button class="btn alt" onclick="exportBlocks()">Blocks CSV</button>
    <label class="btn alt" style="margin:0;color:var(--ink)">Import backup<input type="file" accept=".json" style="display:none" onchange="importJSON(this.files[0])"></label>
    <button class="btn danger" onclick="if(confirm(SYNC.on?'Erase ALL data on EVERY device? Export a backup first.':'Erase ALL data? Export a backup first.')){db=blank();save();render()}">Erase all</button></div></div>
+  <div class="card"><b>Temperature probe (Inkbird ITC-308 WiFi)</b><div id="probeStat" class="small muted" style="margin:6px 0">Checking…</div>
+   <div class="row"><button class="btn alt" onclick="probeCheck(true)">Test connection</button></div><pre id="probeTest" class="small" style="white-space:pre-wrap;max-height:260px;overflow:auto;display:none"></pre></div>
   <div class="card"><b>Environmental sensors</b><p class="small muted">Import readings as CSV with columns: <code>timestamp,sensor_id,zone,measurement,value,unit,quality</code> (zone = room name). Readings are linked to blocks through their location history and shown on each block record. ${db.sensorReadings.length} readings stored.</p>
    <div class="row"><label class="btn alt" style="margin:0;color:var(--ink)">Import sensor CSV<input type="file" accept=".csv,text/csv" style="display:none" onchange="importSensors(this.files[0])"></label>${db.sensorReadings.length?`<button class="btn alt" onclick="if(confirm('Delete all sensor readings?')){db.sensorReadings=[];save();renderSettings()}">Clear readings</button>`:''}</div></div>
   <div class="card"><b>Activity log</b><table>${db.log.slice(-25).reverse().map(l=>`<tr><td class="muted small" style="white-space:nowrap">${fmtDate(l.t)}</td><td class="small">${esc(l.op)}</td><td class="small">${esc(l.msg)}</td></tr>`).join('')}</table></div>`;
