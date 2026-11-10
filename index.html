@@ -81,7 +81,7 @@ dialog::backdrop{background:#0006}
   </nav>
   <button id="opChip" class="chip" onclick="whoDialog()" title="Who is using this device"></button><button class="chip" onclick="activityDialog()">📋 Activity</button>
   <input id="scanbox" placeholder="Scan or type a block ID…" autocomplete="off">
-  <span id="addBtns" style="display:contents"><button class="btn alt" onclick="openNewCulture()">+ Add culture</button><button class="btn alt" onclick="openNewSpawn()">+ Add spawn</button><button class="btn" onclick="openNewBatch()">+ Add batch</button></span>
+  <span id="addBtns" style="display:contents"><button class="btn alt" onclick="openNewCulture()">+ Add LC</button><button class="btn alt" onclick="openNewSpawn()">+ Add spawn</button><button class="btn" onclick="openNewBatch()">+ Add batch</button></span>
 </header>
 <div id="modebar"></div>
 <main>
@@ -497,7 +497,7 @@ function weighCard(bt){
 function idleCard(){
   const today=liveHarvests().filter(h=>h.t>=today0()),r=ROLES[ROLE];
   const tot=today.length?`<p class="small muted" style="margin-top:18px">Harvested today: <b>${fmtW(sum(today.map(h=>h.grams)))}</b> from ${today.length} picks</p>`:'';
-  const adds=`<div class="row" style="justify-content:center;gap:10px"><button class="btn xl" style="max-width:220px" onclick="openNewBatch()">+ Add batch</button><button class="btn xl alt" style="max-width:220px" onclick="openNewSpawn()">+ Add spawn</button><button class="btn xl alt" style="max-width:220px" onclick="openNewCulture()">+ Add culture</button></div>`;
+  const adds=`<div class="row" style="justify-content:center;gap:10px"><button class="btn xl" style="max-width:220px" onclick="openNewBatch()">+ Add batch</button><button class="btn xl alt" style="max-width:220px" onclick="openNewSpawn()">+ Add spawn</button><button class="btn xl alt" style="max-width:220px" onclick="openNewCulture()">+ Add LC</button></div>`;
   const head=(icon,t,sub)=>`<div style="font-size:46px;line-height:1">${icon}</div><div style="font-size:24px;font-weight:700;margin:10px 0 4px">${t}</div><p class="muted" style="margin:0 0 22px">${sub}</p>`;
   let inner;
   if(ROLE==='lab')inner=head('🧪','Scan a culture or spawn bag','A liquid culture starts master spawn. A spawn bag starts a batch of blocks.')+adds;
