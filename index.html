@@ -868,7 +868,7 @@ function spawnCard(sb){
   if(st==='Contaminated')body=`<div class="alert">Marked contaminated ${fmtDay(sb.stageHist[sb.stageHist.length-1].t)}.</div>`;
   else if(st==='Used'){const last=sb.batches[sb.batches.length-1];
     body=`<div class="alert ok">Used for batch${sb.batches.length>1?'es':''} ${sb.batches.map(x=>`<a href="#" onclick="openBatch('${x}');return false"><b>${esc(x)}</b></a>`).join(', ')}</div>
-    ${can('lab')?`<div class="act">${last&&db.batches[last]?`<button class="btn xl alt" onclick="printBlocks(batchBlocks('${last}').map(b=>b.id),true)">Reprint batch ${esc(last)} labels</button>`:''}<button class="btn xl alt" onclick="quickBatch('${sb.id}')">Start another batch · ${quick}</button></div>`:''}`}
+    ${can('lab')?`<div class="act">${last&&db.batches[last]?`<button class="btn xl alt" data-space="1" onclick="printBlocks(batchBlocks('${last}').map(b=>b.id),true)">Reprint batch ${esc(last)} labels</button>`:''}</div>`:''}`}
   else if(!can('lab','grow'))body=`<div class="alert info">Spawn bag — ${st.toLowerCase()}. Handled in the lab.</div>`
   else body=`<div class="act">${can('lab')?`<button class="btn xl green" onclick="quickBatch('${sb.id}')">Start new batch · ${quick}</button>`:''}
     ${st==='Colonizing'?`<button class="btn xl alt" onclick="spawnStage('${sb.id}','Ready')">Fully colonized — ready</button>`:''}
@@ -1494,15 +1494,17 @@ function importSensors(f){if(!f)return;f.text().then(t=>{const lines=t.trim().sp
    The barcode scanner also "types", very fast — key bursts are ignored so scans never trigger shortcuts. */
 let hkTimer=null,hkLast=0,hkBurst=0;
 function hkScope(){return $('dlg').open?$('dlg'):document.querySelector('section.on')}
-function hkButtons(){const sc=hkScope();return sc?[...sc.querySelectorAll('.btn.xl')].filter(b=>b.offsetParent!==null&&!b.disabled).slice(0,9):[]}
+function hkButtons(){const sc=hkScope();return sc?[...sc.querySelectorAll('.btn.xl')].filter(b=>b.offsetParent!==null&&!b.disabled&&!b.dataset.space).slice(0,9):[]}
+function hkSpace(){const sc=hkScope();return sc?[...sc.querySelectorAll('[data-space]')].find(b=>b.offsetParent!==null&&!b.disabled):null}
 let KEYBAR=true;try{KEYBAR=localStorage.getItem('fungatory-keybar')!=='0'}catch(e){}
 function setKeybar(v){KEYBAR=v;try{localStorage.setItem('fungatory-keybar',v?'1':'0')}catch(e){}markHotkeys()}
 function markHotkeys(){
   document.querySelectorAll('.kbd').forEach(k=>k.remove());const bs=hkButtons();bs.forEach((b,i)=>{const k=document.createElement('span');k.className='kbd';k.textContent=i+1;b.prepend(k)});
+  const sp=hkSpace();if(sp){const kk=document.createElement('span');kk.className='kbd';kk.textContent='Space';sp.prepend(kk)}
   const bar=$('keybar'),show=$('keybarShow');if(!bar)return;document.body.classList.toggle('kb',KEYBAR);
   bar.style.display=KEYBAR?'flex':'none';show.style.display=KEYBAR?'none':'';if(!KEYBAR)return;
   const k=(key,txt)=>`<span class="k"><kbd>${key}</kbd>${esc(txt)}</span>`,dlgOpen=$('dlg').open;
-  const nums=bs.map((b,i)=>k(i+1,b.textContent.replace(/^\d/,'').replace(/·.*$/,'').trim().slice(0,28)));
+  const nums=(sp?[k('Space',sp.textContent.replace(/^Space/,'').trim().slice(0,28))]:[]).concat(bs.map((b,i)=>k(i+1,b.textContent.replace(/^\d/,'').replace(/·.*$/,'').trim().slice(0,28))));
   const ctx=dlgOpen?[k('Enter','Save'),k('Esc','Close')]
     :[station.block||station.spawn||station.culture?k('Esc','Done'):'',k('/','Type an ID'),
       can('lab')?k('B','Batch')+k('S','Spawn')+k('L','LC'):'',can('prep')&&ROLE!=='all'?k('R','Start run'):'',
@@ -1515,6 +1517,7 @@ $('dlg').addEventListener('close',hkLater);
 function hkPress(b){b.classList.add('hk-flash');setTimeout(()=>b.classList.remove('hk-flash'),250);b.click()}
 const HK=[
   ['1 – 9','Press the numbered button on screen',()=>true],
+  ['Space','Reprint the batch labels (after scanning a used spawn bag)',()=>can('lab')],
   ['Enter','Save the form you are typing in',()=>true],
   ['Esc','Close a window / go back to the scan screen',()=>true],
   ['/','Jump to the scan box (type an ID)',()=>true],
@@ -1526,6 +1529,7 @@ function hkHelp(){dlg(`<h3 style="margin-top:0">⌨ Keyboard shortcuts</h3><tabl
   <p class="small muted">Shortcuts don't fire while you're typing in a box, and scanner input is never mistaken for a shortcut.</p><div class="row"><button class="btn alt" onclick="closeDlg()">Close</button></div>`)}
 function goHome(){station.block=null;station.spawn=null;station.culture=null;station.decision=false;station.finishing=false;show('home')}
 function runHotkey(k){
+  if(k===' '){const b=hkSpace();if(b)hkPress(b);return}
   if(/^[1-9]$/.test(k)){const b=hkButtons()[+k-1];if(b)hkPress(b);return}
   if($('dlg').open)return;const K=k.toLowerCase();
   if(k==='?')return hkHelp();
@@ -1551,6 +1555,7 @@ document.addEventListener('keydown',e=>{
   if(now-hkLast<80)hkBurst=now+250;hkLast=now;
   if(now<hkBurst){clearTimeout(hkTimer);hkTimer=null;return}
   if(e.key==='Escape'){if(!$('dlg').open&&tab==='home')goHome();return}
+  if(e.key===' '&&hkSpace())e.preventDefault();
   if(e.key.length!==1)return;
   const k=e.key;clearTimeout(hkTimer);hkTimer=setTimeout(()=>{hkTimer=null;if(performance.now()<hkBurst)return;runHotkey(k)},90);
 },true);
