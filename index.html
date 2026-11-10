@@ -79,7 +79,7 @@ dialog::backdrop{background:#0006}
   <nav id="nav">
     <button data-t="home" class="on">Home</button><button id="moreBtn" onclick="toggleMore()">More ▾<span id="taskBadge"></span></button><span id="moreNav"><button data-t="dash">Dashboard</button><button data-t="blocks">Blocks</button><button data-t="batches">Batches</button><button data-t="inventory">Inventory</button><button data-t="planning">Planning</button><button data-t="tasks">Tasks</button><button data-t="labels">Labels</button><button data-t="settings">Settings</button></span>
   </nav>
-  <select id="opSel" title="Operator"></select>
+  <button id="opChip" class="chip" onclick="whoDialog()" title="Who is using this device"></button><button class="chip" onclick="activityDialog()">📋 Activity</button>
   <input id="scanbox" placeholder="Scan or type a block ID…" autocomplete="off">
   <span id="addBtns" style="display:contents"><button class="btn alt" onclick="openNewSpawn()">+ Add spawn</button><button class="btn" onclick="openNewBatch()">+ Add batch</button></span>
 </header>
@@ -125,7 +125,7 @@ const sum=a=>a.reduce((x,y)=>x+y,0);
 
 function blank(){return {v:2,settings:{unit:'lb',labelW:50,labelH:30,operators:['Trace'],op:'Trace',rooms:['Lab','Incubation','Fruiting'],nextBatch:1,bagIncluded:true,bagWeight:0,autoStart:true,autoHarvest:true,autoPrint:true,captureMin:200,rearm:30,stableTol:5,stableMs:1000,buffer:10,capInoc:100,horizon:12,useMeasured:true},
   strains:[],cultures:[],spawn:[],spawnBags:{},recipes:[],batches:{},blocks:{},harvests:[],targets:{},lead:{},orders:[],tasks:[],snapshots:{},sensorReadings:[],log:[]}}
-let db=load();
+let db=load();db.log.forEach((l,i)=>{if(!l.id)l.id='l'+hashStr(l.t+'|'+l.msg+'|'+i)});
 function load(){
   try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.blocks){const b=blank();const out=Object.assign(b,d);out.settings=Object.assign(blank().settings,d.settings||{});return out}}catch(e){}
   try{const o=JSON.parse(localStorage.getItem(OLDKEY));if(o&&o.bags){const m=migrate(o);localStorage.setItem(KEY,JSON.stringify(m));return m}}catch(e){}
@@ -153,15 +153,15 @@ function save(){try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){toast(
    server last had, pushes only records it changed, and pulls other devices' changes every few seconds.
    Works offline: unsent changes stay in this browser and go up when the server is reachable again. */
 const SYNC={on:false,ver:0,shadow:{},busy:false,again:false,t:null,key:'',state:'',first:false,dirty:false};
-const S_MAPS=['batches','blocks','spawnBags','targets','lead','snapshots'],S_LISTS=['harvests','tasks','orders','spawn','cultures','strains','recipes'];
+const S_MAPS=['batches','blocks','spawnBags','targets','lead','snapshots'],S_LISTS=['harvests','tasks','orders','spawn','cultures','strains','recipes','log'];
 function flatten(d){const r={};S_MAPS.forEach(c=>Object.entries(d[c]||{}).forEach(([k,v])=>{r[c+'/'+k]=v}));
   S_LISTS.forEach(c=>(d[c]||[]).forEach(v=>{if(v&&v.id!=null)r[c+'/'+v.id]=v}));
-  const st=Object.assign({},d.settings);delete st.op;r['_/settings']=st;r['_/sensorReadings']=d.sensorReadings||[];r['_/log']=d.log||[];return r}
+  const st=Object.assign({},d.settings);delete st.op;r['_/settings']=st;r['_/sensorReadings']=d.sensorReadings||[];return r}
 function unflatten(r,op){const d=blank();d.settings=Object.assign(blank().settings,r['_/settings']||{});if(op)d.settings.op=op;
-  if(r['_/sensorReadings'])d.sensorReadings=r['_/sensorReadings'];if(r['_/log'])d.log=r['_/log'];
+  if(r['_/sensorReadings'])d.sensorReadings=r['_/sensorReadings'];
   for(const [k,v] of Object.entries(r)){if(v==null||k.startsWith('_/'))continue;const i=k.indexOf('/'),c=k.slice(0,i),id=k.slice(i+1);
     if(S_MAPS.includes(c))d[c][id]=v;else if(S_LISTS.includes(c))d[c].push(v)}
-  const byT=k=>(a,b)=>(a[k]||0)-(b[k]||0);d.harvests.sort(byT('t'));d.tasks.sort(byT('created'));d.strains.sort(byT('created'));
+  const byT=k=>(a,b)=>(a[k]||0)-(b[k]||0);d.harvests.sort(byT('t'));d.tasks.sort(byT('created'));d.strains.sort(byT('created'));d.log.sort(byT('t'));
   d.spawn.sort((a,b)=>String(a.date).localeCompare(String(b.date))||String(a.id).localeCompare(String(b.id),undefined,{numeric:true}));
   return d}
 function syncSaveState(){try{localStorage.setItem('fungatory-sync',JSON.stringify({ver:SYNC.ver,shadow:SYNC.shadow}))}catch(e){}}
@@ -207,7 +207,7 @@ async function syncStart(){
 }
 let syncLoopOn=false;
 function syncLoop(){if(syncLoopOn)return;syncLoopOn=true;setInterval(pullNow,5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)pullNow()});window.addEventListener('online',pullNow)}
-function audit(msg){db.log.push({t:Date.now(),op:op(),msg});if(db.log.length>3000)db.log.splice(0,db.log.length-3000)}
+function audit(msg){db.log.push({id:uid(),t:Date.now(),op:op(),room:ROLE||'',msg});if(db.log.length>3000)db.log.splice(0,db.log.length-3000)}
 const op=()=>db.settings.op||'';
 const U=()=>db.settings.unit==='lb'?'lb':'g';
 function fmtW(g){if(g==null||isNaN(g))return '—';return db.settings.unit==='lb'?(g/453.592).toFixed(2)+' lb':(Math.abs(g)>=1000?(g/1000).toFixed(2)+' kg':Math.round(g)+' g')}
@@ -255,7 +255,7 @@ const ROLES={
   grow:{icon:'🌱',name:'Incubation / Fruiting',desc:'Move blocks into fruiting, mark contamination, finish blocks.'},
   harvest:{icon:'⚖️',name:'Harvesting',desc:'Scan a block, set mushrooms on the scale. Nothing else.'},
   all:{icon:'🗂',name:'Office — everything',desc:'All screens: dashboards, planning, tasks, settings.'}};
-let ROLE=null,QUICK=false;try{ROLE=localStorage.getItem('fungatory-role');QUICK=localStorage.getItem('fungatory-quick')==='1'}catch(e){}
+var ROLE=null,QUICK=false;try{ROLE=localStorage.getItem('fungatory-role');QUICK=localStorage.getItem('fungatory-quick')==='1'}catch(e){}
 if(ROLE&&!ROLES[ROLE])ROLE=null;
 const can=(...rs)=>!ROLE||ROLE==='all'||rs.includes(ROLE);
 function setRole(r){ROLE=r;try{localStorage.setItem('fungatory-role',r)}catch(e){}closeDlg();station.block=null;station.spawn=null;show('home')}
@@ -275,11 +275,33 @@ function renderHeader(){
   $('addBtns').style.display=full||ROLE==='lab'?'contents':'none';$('moreBtn').style.display=full?'':'none';
   document.querySelector('nav [data-t="home"]').style.display=full?'':'none';
   const pc=$('printerChip');pc.style.display=can('lab')&&ROLE?'':'none';pc.innerHTML=PRINTER==='bt'?(PH.ch&&PH.dev&&PH.dev.gatt.connected?'🖨 '+esc(PH.dev.name||'Printer')+' ✓':'🖨 Printer — tap to connect'):'🖨 Printer';if(!full&&moreOpen)toggleMore();
-  $('opSel').style.display=db.settings.operators.length>1?'':'none';
-  $('opSel').innerHTML=db.settings.operators.map(o=>`<option ${o===op()?'selected':''}>${esc(o)}</option>`).join('');
+  $('opChip').innerHTML=op()?'👤 '+esc(op()):'👤 Who are you?';
   const due=db.tasks.filter(t=>t.status==='open'&&t.due<=today0()+DAY-1).length;$('taskBadge').innerHTML=due?`<span class="badge">${due}</span>`:'';
 }
-$('opSel').onchange=e=>{db.settings.op=e.target.value;save()};
+function whoDialog(){
+  const ops=db.settings.operators;
+  dlg(`<h3 style="margin-top:0">Who's using this device?</h3><p class="small muted" style="margin-top:0">Everything done here is saved in the activity log under this name. Each device remembers its own person.</p>
+  <div class="act">${ops.map((o,i)=>`<div class="row" style="margin:0;flex-wrap:nowrap"><button class="btn xl ${o===op()?'green':'alt'}" style="flex:1" onclick="setOp(${i})">👤 ${esc(o)}</button>${can()?`<button class="chip" title="Remove" onclick="removeOp(${i})">✕</button>`:''}</div>`).join('')}</div>
+  <div class="row"><input id="newOp" placeholder="Add a person (e.g. Maria)" style="flex:1" onkeydown="if(event.key==='Enter')addOp()"><button class="btn" onclick="addOp()">Add</button></div>
+  <div class="row"><button class="btn alt" onclick="closeDlg()">Close</button></div>`);
+}
+function setOp(i){const o=db.settings.operators[i];if(!o)return;db.settings.op=o;save();closeDlg();renderHeader();toast('Now logging as '+o)}
+function addOp(){const v=$('newOp').value.trim();if(!v)return;if(db.settings.operators.some(o=>o.toLowerCase()===v.toLowerCase()))return toast(v+' is already on the list');
+  db.settings.operators.push(v);db.settings.op=v;audit('Added person '+v);save();closeDlg();renderHeader();toast('Now logging as '+v)}
+function removeOp(i){const o=db.settings.operators[i];if(!confirm(`Remove ${o} from the list? Their past activity stays in the log.`))return;
+  db.settings.operators.splice(i,1);if(db.settings.op===o)db.settings.op=db.settings.operators[0]||'';save();whoDialog();renderHeader()}
+let actFilter='',actDay='all';
+function activityDialog(){
+  const people=[...new Set([...db.settings.operators,...db.log.map(l=>l.op).filter(Boolean)])],since=actDay==='today'?today0():actDay==='week'?Date.now()-7*DAY:0;
+  const list=db.log.filter(l=>(!actFilter||l.op===actFilter)&&l.t>=since).slice().reverse().slice(0,400);
+  const room=r=>ROLES[r]?`<span class="tag">${ROLES[r].icon} ${esc(ROLES[r].name.split(' ')[0])}</span>`:'';
+  let lastDay='';
+  dlg(`<h3 style="margin-top:0">📋 Activity</h3><div class="row" style="margin-top:0"><select onchange="actFilter=this.value;activityDialog()"><option value="">Everyone</option>${people.map(p=>`<option ${p===actFilter?'selected':''}>${esc(p)}</option>`).join('')}</select>
+   <span class="chips">${[['today','Today'],['week','7 days'],['all','All']].map(([k,l])=>`<button class="chip ${actDay===k?'on':''}" onclick="actDay='${k}';activityDialog()">${l}</button>`).join('')}</span></div>
+   <div style="max-height:62vh;overflow:auto;margin-top:8px"><table>${list.map(l=>{const d=fmtDay(l.t),h=d!==lastDay?`<tr><td colspan="3" style="padding-top:12px"><b>${d}</b></td></tr>`:'';lastDay=d;
+     return h+`<tr><td class="small muted" style="white-space:nowrap">${new Date(l.t).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</td><td class="small" style="white-space:nowrap"><b>${esc(l.op||'—')}</b> ${room(l.room)}</td><td class="small">${esc(l.msg)}</td></tr>`}).join('')||'<tr><td class="muted">Nothing here yet.</td></tr>'}</table></div>
+   <div class="row"><button class="btn alt" onclick="closeDlg()">Close</button></div>`);
+}
 function setMode(t,arg){if(t==='stage'||t==='loc'){mode={type:t,arg};render();return}mode={type:'lookup'};station.block=null;show('home')}
 function renderMode(){const m=mode.type;
   $('modebar').innerHTML=(m==='stage'||m==='loc')?`<span class="pill a">Scanning moves blocks ${m==='stage'?'→ ':'to '}${esc(mode.arg)}</span> <button class="chip" onclick="mode={type:'lookup'};render()">Stop</button>`:'';
@@ -704,6 +726,19 @@ function quickBatch(bagId){
   const bt=makeBatch({species:l.species,strain:l.strain,count:d.n,blockWeight:d.w,spawnLot:l.id,spawnBag:bagId});
   if(!bt)return;renderHome();printBlocks(batchBlocks(bt.id).map(b=>b.id));
 }
+function askDelSpawn(id){const b=db.spawnBags[id],n=Object.values(db.spawnBags).filter(x=>x.lotId===b.lotId).length;
+  dlg(`<h3 style="margin-top:0">Delete spawn</h3><div class="act"><button class="btn xl danger" onclick="closeDlg();delSpawnBag('${id}')">Delete just this bag (${esc(id)})</button>
+  <button class="btn xl danger" onclick="closeDlg();delSpawnLot('${esc(b.lotId)}')">Delete the whole lot ${esc(b.lotId)} (${n} bag${n===1?'':'s'})</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`)}
+function delSpawnBag(id){const b=db.spawnBags[id];if(!b)return;const used=(b.batches||[]).length;
+  if(!confirm(used?`${id} was used for batch ${b.batches.join(', ')}. Delete it anyway? The batch keeps its own record.`:`Delete spawn bag ${id}? This can't be undone.`))return;
+  const l=db.spawn.find(x=>x.id===b.lotId);
+  if(l){l.bags=Math.max(0,(l.bags||1)-1);if(l.bagWeight){const kg=l.bagWeight/1000;l.qty=Math.max(0,(l.qty||0)-kg);if(!b.deducted)l.remaining=Math.max(0,(l.remaining??l.qty)-kg)}}
+  delete db.spawnBags[id];if(l&&!Object.values(db.spawnBags).some(x=>x.lotId===l.id))db.spawn=db.spawn.filter(x=>x.id!==l.id);
+  audit(`Deleted spawn bag ${id}`);save();toast(id+' deleted');if(station.spawn===id)station.spawn=null;render()}
+function delSpawnLot(id){const bags=Object.values(db.spawnBags).filter(b=>b.lotId===id),used=bags.filter(b=>(b.batches||[]).length).length;
+  if(!confirm(`Delete spawn lot ${id} and its ${bags.length} bag${bags.length===1?'':'s'}?${used?` ${used} were already used for batches — those batches keep their own records.`:''} This can't be undone.`))return;
+  bags.forEach(b=>delete db.spawnBags[b.id]);db.spawn=db.spawn.filter(x=>x.id!==id);
+  audit(`Deleted spawn lot ${id}`);save();toast('Spawn lot '+id+' deleted');if(station.spawn&&!db.spawnBags[station.spawn])station.spawn=null;render()}
 function spawnCard(sb){
   const l=db.spawn.find(x=>x.id===sb.lotId)||{},d=batchDefault(l.species),st=sb.stage,age=Math.floor((Date.now()-sb.stageHist[0].t)/DAY);
   const quick=d.w!=null?`${d.n} blocks × ${fmtW(d.w)}`:'set up batch';let body;
@@ -718,7 +753,7 @@ function spawnCard(sb){
     ${can('lab')?`<p class="small muted">Inoculation date is today. <a href="#" onclick="openNewBatch({spawnBag:'${sb.id}'});return false">Change count, weight or details</a></p>`:''}`;
   return `<div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:flex-start"><div><div class="bigid">${esc(sb.id)}</div><div class="muted">Spawn · ${esc(l.species||'')} ${esc(l.strain||'')}${l.genetics?` <span class="tag">${esc(l.genetics)}</span>`:''}</div></div><span class="pill ${st==='Contaminated'?'r':st==='Ready'?'g':''}">${st}</span></div>
    <div class="small muted" style="margin:6px 0 14px">Lot ${esc(sb.lotId)} · made ${fmtDay(sb.stageHist[0].t)} · day ${age}${l.bagWeight?' · '+fmtW(l.bagWeight):''}${l.cultureId?' · culture '+esc(l.cultureId):''}</div>${body}
-   <div class="row" style="margin-top:16px;justify-content:space-between"><span class="chips">${can('lab')?`<button class="chip" onclick="printSpawn(['${sb.id}'])">Reprint label</button>`:''}</span>
+   <div class="row" style="margin-top:16px;justify-content:space-between"><span class="chips">${can('lab')?`<button class="chip" onclick="printSpawn(['${sb.id}'])">Reprint label</button><button class="chip" onclick="askDelSpawn('${sb.id}')">Delete…</button>`:''}</span>
    <button class="btn alt" onclick="station.spawn=null;renderHome()">Done</button></div></div>`;
 }
 function setBatchWeight(id){const bt=db.batches[id],v=prompt(`Weight per block (${U()}) — applies to every block in batch ${id} that hasn't been weighed individually`,bt.blockWeight!=null?wOut(bt.blockWeight):'');if(v===null)return;
@@ -750,8 +785,8 @@ function renderInventory(){
   $('inventory').innerHTML=`${strainsCard()}<div class="card"><b>Culture lots</b><div class="scroll"><table><tr><th>Lot</th><th>Species / strain</th><th>Date</th><th>Source / parent</th><th>Status</th><th>Notes</th></tr>
    ${db.cultures.map(c=>`<tr><td><b>${esc(c.id)}</b></td><td>${esc(c.species)} ${esc(c.strain)}</td><td>${fmtDay(pdate(c.date))}</td><td>${esc(c.source)}</td><td><select onchange="db.cultures.find(x=>x.id==='${c.id}').status=this.value;save()">${['Active','Expanded','Retired'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></td><td>${esc(c.notes)}</td></tr>`).join('')}</table></div>
    <div class="row"><input id="cu_id" placeholder="Lot ID" style="width:100px"><input id="cu_sp" placeholder="Species" style="width:120px"><input id="cu_st" placeholder="Strain" style="width:130px"><input id="cu_d" type="date" value="${dstr(Date.now())}"><input id="cu_src" placeholder="Source / parent lot" style="width:150px"><input id="cu_n" placeholder="Notes"><button class="btn" onclick="addCulture()">Add</button></div></div>
-  <div class="card"><b>Spawn lots</b><div class="scroll"><table><tr><th>Lot</th><th>From culture</th><th>Species / strain</th><th>Made</th><th class="n">Made (kg)</th><th class="n">Remaining (kg)</th><th>Notes</th><th>Bags</th></tr>
-   ${db.spawn.map(s=>`<tr><td><b>${esc(s.id)}</b></td><td>${esc(s.cultureId||'—')}</td><td>${esc(s.species)} ${esc(s.strain)}</td><td>${fmtDay(pdate(s.date))}</td><td class="n">${r1(s.qty)}</td><td class="n"><input type="number" step="any" value="${r1(s.remaining??s.qty)}" style="width:80px" onchange="db.spawn.find(x=>x.id==='${s.id}').remaining=+this.value;save()"></td><td>${esc(s.notes)}</td><td>${spawnLotBags(s.id)}</td></tr>`).join('')}</table></div>
+  <div class="card"><b>Spawn lots</b><div class="scroll"><table><tr><th>Lot</th><th>From culture</th><th>Species / strain</th><th>Made</th><th class="n">Made (kg)</th><th class="n">Remaining (kg)</th><th>Notes</th><th>Bags</th><th></th></tr>
+   ${db.spawn.map(s=>`<tr><td><b>${esc(s.id)}</b></td><td>${esc(s.cultureId||'—')}</td><td>${esc(s.species)} ${esc(s.strain)}</td><td>${fmtDay(pdate(s.date))}</td><td class="n">${r1(s.qty)}</td><td class="n"><input type="number" step="any" value="${r1(s.remaining??s.qty)}" style="width:80px" onchange="db.spawn.find(x=>x.id==='${s.id}').remaining=+this.value;save()"></td><td>${esc(s.notes)}</td><td>${spawnLotBags(s.id)}</td><td>${can('lab')?`<button class="chip" title="Delete this spawn lot" onclick="delSpawnLot('${esc(s.id)}')">✕</button>`:''}</td></tr>`).join('')}</table></div>
    <div class="row"><button class="btn" onclick="openNewSpawn()">+ Add spawn bags</button><span class="small muted">Each bag gets its own label. Scan a bag on the home screen to start a batch from it.</span></div></div>
   <div class="card"><b>Substrate recipes</b><table><tr><th>Recipe</th><th>Version</th><th>Ingredients</th></tr>${db.recipes.map(r=>`<tr><td><b>${esc(r.name)}</b></td><td>v${esc(r.version)}</td><td>${esc(r.ingredients)}</td></tr>`).join('')}</table>
    <div class="row"><input id="rc_n" placeholder="Name (e.g. Masters mix)" style="width:180px"><input id="rc_v" placeholder="Version" style="width:80px" value="1"><input id="rc_i" placeholder="Ingredients &amp; quantities" style="flex:1;min-width:200px"><button class="btn" onclick="addRecipe()">Add</button></div>
