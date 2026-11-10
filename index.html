@@ -1218,7 +1218,7 @@ function setPageCSS(){
   s.textContent=`.label{width:${w}mm;height:${h}mm;padding:2mm}.label .qr,.label .qr img,.label .qr canvas{width:${q}mm!important;height:${q}mm!important}@media print{@page{size:${w}mm ${h}mm;margin:0}}`;
 }
 const labelHTML=it=>`<div class="label"><div class="qr" data-code="${esc(it.code)}"></div><div><b>${esc(it.title)}</b>${(it.lines||[]).map(l=>!l?'':typeof l==='string'?`<small>${esc(l)}</small>`:`<small style="font-size:${Math.round(l.s/0.11*10)}px;${l.b?'font-weight:700;':''}line-height:1.15">${esc(l.t)}</small>`).join('')}</div></div>`;
-function blockLabel(id){const b=db.blocks[id],bt=batchOf(b);return {code:id,title:id,lines:[[bt.species,bt.strain].filter(Boolean).join(' '),'Inoc '+fmtDay(blockInocT(b))]}}
+function blockLabel(id){const b=db.blocks[id],bt=batchOf(b);return {code:id,title:id,lines:[{t:'FB',s:0.12,b:true},{t:[bt.species,bt.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Inoc '+fmtDay(blockInocT(b)),s:0.085}]}}
 function renderQR(root){if(typeof QRCode==='undefined'){toast('QR library not loaded (offline?)');return}root.querySelectorAll('.qr').forEach(el=>{el.innerHTML='';new QRCode(el,{text:el.dataset.code,width:168,height:168,correctLevel:QRCode.CorrectLevel.M})})}
 function dialogPrint(items){const z=$('printZone');setPageCSS();z.innerHTML=items.map(labelHTML).join('');renderQR(z);setTimeout(()=>window.print(),350)}
 function printItems(items){if(!items.length)return toast('Nothing to print');if(PRINTER==='bt')return phPrint(items);dialogPrint(items)}
