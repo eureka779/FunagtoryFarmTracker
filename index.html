@@ -971,10 +971,23 @@ async function phConnect(pick,all){
   renderHeader();return PH.ch;
 }
 if('bluetooth' in navigator&&navigator.bluetooth.getDevices&&PRINTER==='bt')navigator.bluetooth.getDevices().then(ds=>{if(ds[0]&&!PH.dev){PH.dev=ds[0];PH.dev.addEventListener('gattserverdisconnected',()=>{PH.ch=null;renderHeader()})}}).catch(()=>{});
+/* Windows drops Bluetooth packets that are sent too fast without confirmation, which makes the printer
+   feed a blank label. "Safe" mode waits for the printer to confirm every chunk. */
 async function phWrite(bytes){
-  const c=PH.ch,wr=c.properties.writeWithoutResponse&&c.writeValueWithoutResponse;
-  for(let i=0;i<bytes.length;i+=PH.chunk){const part=bytes.slice(i,i+PH.chunk);
-    if(wr){await c.writeValueWithoutResponse(part);await sleep(PH.chunk>50?15:6)}else await c.writeValue(part)}
+  const c=PH.ch,safe=(db.settings.phSend||'safe')==='safe';
+  const confirmOk=c.properties.write&&c.writeValueWithResponse,fast=c.properties.writeWithoutResponse&&c.writeValueWithoutResponse;
+  const size=safe?Math.min(PH.chunk,100):PH.chunk,t0=Date.now();
+  for(let i=0;i<bytes.length;i+=size){const part=bytes.slice(i,i+size);
+    if(safe&&confirmOk)await c.writeValueWithResponse(part);
+    else if(fast){await c.writeValueWithoutResponse(part);await sleep(safe?40:15)}
+    else await c.writeValue(part)}
+  phLog(`Sent ${bytes.length} bytes in ${Math.ceil(bytes.length/size)} chunks (${safe?(confirmOk?'confirmed':'slow'):'fast'}) in ${((Date.now()-t0)/1000).toFixed(1)}s`);
+}
+async function phBlackTest(){
+  const cfg=phCfg(),hb=Math.max(Math.ceil((+db.settings.labelW||50)),cfg.head||0)||72,h=160,bits=new Uint8Array(hb*h).fill(0xff);
+  const b={bits,wb:hb,h};const saved=db.settings.phAlign;db.settings.phAlign='left';const job=phJob(b);db.settings.phAlign=saved;
+  if(PH.busy)return toast('Printer busy');PH.busy=true;
+  try{await phConnect(false);await phWrite(job);await phDone(4000);toast('Sent a solid black test')}catch(e){toast('Printer: '+e.message);phLog('Error: '+e.message)}finally{PH.busy=false;printerSetup()}
 }
 async function labelBitmap(it){
   const W=Math.ceil(Math.round((+db.settings.labelW||50)*8)/8)*8,H=Math.round((+db.settings.labelH||30)*8),m=12;
@@ -1031,6 +1044,8 @@ function printerSetup(){
    <label>Printer model<select onchange="db.settings.phModel=this.value;delete db.settings.phAlign;delete db.settings.phProto;delete db.settings.phHead;save();printerSetup()">${Object.entries(PH_MODELS).map(([k,m])=>`<option value="${k}" ${(db.settings.phModel||'m220')===k?'selected':''}>${m.name}</option>`).join('')}</select></label>
    <div class="alert info small"><b>Test label came out blank?</b> The label may be sitting under a different part of the print head. Print a test at each position and keep the one that works:
    <div class="row">${['left','center','right'].map(a=>`<button class="btn ${phCfg().align===a?'':'alt'}" onclick="db.settings.phAlign='${a}';save();phTest()">Test ${a}</button>`).join('')}</div>
+   <div class="row"><span>Still blank?</span><button class="chip" onclick="phBlackTest()">Print a solid black block</button><span class="small muted">— if even this comes out blank, the data isn't reaching the print head</span></div>
+   <div class="row"><span>Sending</span><select onchange="db.settings.phSend=this.value;save()"><option value="safe" ${(db.settings.phSend||'safe')==='safe'?'selected':''}>Safe — slower, every chunk confirmed (best on Windows)</option><option value="fast" ${db.settings.phSend==='fast'?'selected':''}>Fast</option></select></div>
    <div class="row"><span>Still blank at every position?</span><button class="chip" onclick="db.settings.phProto=phCfg().proto==='esc'?'m110':'esc';save();printerSetup()">Switch command set (now: ${phCfg().proto==='esc'?'ESC/POS':'M110'})</button></div></div>
    <label>Darkness <b id="dv">${db.settings.phDensity||10}</b> / 15<input type="range" min="1" max="15" value="${db.settings.phDensity||10}" oninput="$('dv').textContent=this.value" onchange="db.settings.phDensity=+this.value;save()"></label>`
    :'<p class="small muted">Uses the normal print window. Pick the Phomemo there with paper size set to your label and no margins.</p>'}
