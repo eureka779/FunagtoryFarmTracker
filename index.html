@@ -81,7 +81,7 @@ dialog::backdrop{background:#0006}
   </nav>
   <button id="opChip" class="chip" onclick="whoDialog()" title="Who is using this device"></button><button class="chip" onclick="activityDialog()">📋 Activity</button>
   <input id="scanbox" placeholder="Scan or type a block ID…" autocomplete="off">
-  <span id="addBtns" style="display:contents"><button class="btn alt" onclick="openNewSpawn()">+ Add spawn</button><button class="btn" onclick="openNewBatch()">+ Add batch</button></span>
+  <span id="addBtns" style="display:contents"><button class="btn alt" onclick="openNewCulture()">+ Add culture</button><button class="btn alt" onclick="openNewSpawn()">+ Add spawn</button><button class="btn" onclick="openNewBatch()">+ Add batch</button></span>
 </header>
 <div id="modebar"></div>
 <main>
@@ -124,7 +124,7 @@ const pct=x=>x==null||isNaN(x)?'—':Math.round(x)+'%';
 const sum=a=>a.reduce((x,y)=>x+y,0);
 
 function blank(){return {v:2,settings:{unit:'lb',labelW:50,labelH:30,operators:['Trace'],op:'Trace',rooms:['Lab','Incubation','Fruiting'],nextBatch:1,bagIncluded:true,bagWeight:0,autoStart:true,autoHarvest:true,autoPrint:true,captureMin:200,rearm:30,stableTol:5,stableMs:1000,buffer:10,capInoc:100,horizon:12,useMeasured:true},
-  strains:[],cultures:[],spawn:[],spawnBags:{},recipes:[],batches:{},blocks:{},harvests:[],targets:{},lead:{},orders:[],tasks:[],snapshots:{},sensorReadings:[],log:[]}}
+  strains:[],cultures:[],cultureJars:{},spawn:[],spawnBags:{},recipes:[],batches:{},blocks:{},harvests:[],targets:{},lead:{},orders:[],tasks:[],snapshots:{},sensorReadings:[],log:[]}}
 let db=load();db.log.forEach((l,i)=>{if(!l.id)l.id='l'+hashStr(l.t+'|'+l.msg+'|'+i)});
 function load(){
   try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.blocks){const b=blank();const out=Object.assign(b,d);out.settings=Object.assign(blank().settings,d.settings||{});return out}}catch(e){}
@@ -153,7 +153,7 @@ function save(){try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){toast(
    server last had, pushes only records it changed, and pulls other devices' changes every few seconds.
    Works offline: unsent changes stay in this browser and go up when the server is reachable again. */
 const SYNC={on:false,ver:0,shadow:{},busy:false,again:false,t:null,key:'',state:'',first:false,dirty:false};
-const S_MAPS=['batches','blocks','spawnBags','targets','lead','snapshots'],S_LISTS=['harvests','tasks','orders','spawn','cultures','strains','recipes','log'];
+const S_MAPS=['batches','blocks','spawnBags','cultureJars','targets','lead','snapshots'],S_LISTS=['harvests','tasks','orders','spawn','cultures','strains','recipes','log'];
 function flatten(d){const r={};S_MAPS.forEach(c=>Object.entries(d[c]||{}).forEach(([k,v])=>{r[c+'/'+k]=v}));
   S_LISTS.forEach(c=>(d[c]||[]).forEach(v=>{if(v&&v.id!=null)r[c+'/'+v.id]=v}));
   const st=Object.assign({},d.settings);delete st.op;r['_/settings']=st;r['_/sensorReadings']=d.sensorReadings||[];return r}
@@ -330,6 +330,7 @@ function handleScan(raw){
   }
   const id=normId(code),b=db.blocks[id];
   if(!b&&db.spawnBags[id]){if($('dlg').open)closeDlg();beep();return goSpawn(id)}
+  if(!b&&db.cultureJars[id]){if($('dlg').open)closeDlg();beep();return goCulture(id)}
   if(!b){if(db.batches[id]){openBatch(id);return}beep(250);toast('Unknown ID: '+id);return}
   if($('dlg').open)closeDlg();
   const m=mode.type;
@@ -438,7 +439,7 @@ function openClose(id){
   <label>Notes<textarea id="cl_n"></textarea></label>
   <div class="row"><button class="btn danger" onclick="const b=db.blocks['${id}'],w=+$('cl_w').value;doClose(b,w>0?wIn(w):null,$('cl_r').value,(pdate($('cl_d').value)||Date.now())+new Date().getHours()*36e5,$('cl_n').value);closeDlg();if(station.block==='${id}'){station.block=null;station.decision=false}render()">Close block</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`);
 }
-function goBlock(id){station.spawn=null;station.block=id;station.decision=false;station.finishing=false;armed=true;if(mode.type!=='stage'&&mode.type!=='loc')mode={type:'harvest'};show('home')}
+function goBlock(id){station.spawn=null;station.culture=null;station.block=id;station.decision=false;station.finishing=false;armed=true;if(mode.type!=='stage'&&mode.type!=='loc')mode={type:'harvest'};show('home')}
 function addBlocks(bt){const made=[];let id;while((id=nextNewId(bt))){const b=newBlock(bt,id);if(bt.blockWeight!=null){b.startWeight=bt.blockWeight;b.startT=Date.now()}made.push(id)}return made}
 function startWeighing(id){station.batch=id;station.block=null;station.last=null;station.decision=false;station.finishing=false;armed=true;show('home')}
 function saveStart(id){const b=db.blocks[id],g=net();if(!(g>0))return toast('Put the block on the scale first');
@@ -496,10 +497,10 @@ function weighCard(bt){
 function idleCard(){
   const today=liveHarvests().filter(h=>h.t>=today0()),r=ROLES[ROLE];
   const tot=today.length?`<p class="small muted" style="margin-top:18px">Harvested today: <b>${fmtW(sum(today.map(h=>h.grams)))}</b> from ${today.length} picks</p>`:'';
-  const adds=`<div class="row" style="justify-content:center;gap:10px"><button class="btn xl" style="max-width:240px" onclick="openNewBatch()">+ Add batch</button><button class="btn xl alt" style="max-width:240px" onclick="openNewSpawn()">+ Add spawn</button></div>`;
+  const adds=`<div class="row" style="justify-content:center;gap:10px"><button class="btn xl" style="max-width:220px" onclick="openNewBatch()">+ Add batch</button><button class="btn xl alt" style="max-width:220px" onclick="openNewSpawn()">+ Add spawn</button><button class="btn xl alt" style="max-width:220px" onclick="openNewCulture()">+ Add culture</button></div>`;
   const head=(icon,t,sub)=>`<div style="font-size:46px;line-height:1">${icon}</div><div style="font-size:24px;font-weight:700;margin:10px 0 4px">${t}</div><p class="muted" style="margin:0 0 22px">${sub}</p>`;
   let inner;
-  if(ROLE==='lab')inner=head('🧪','Scan a spawn bag','It starts a new batch and prints the block labels.')+adds;
+  if(ROLE==='lab')inner=head('🧪','Scan a culture or spawn bag','A liquid culture starts master spawn. A spawn bag starts a batch of blocks.')+adds;
   else if(ROLE==='grow'){const inc=Object.values(db.blocks).filter(b=>b.stage==='Inoculated'||b.stage==='Incubating').length,fr=Object.values(db.blocks).filter(b=>b.stage==='Fruiting'||b.stage==='Between flushes').length;
     inner=head('🌱','Scan a block',QUICK?'Incubating blocks go straight to fruiting when scanned.':'Move it to fruiting, mark contamination, or finish it.')+
     `<label style="display:inline-flex;gap:8px;align-items:center;color:var(--ink);font-size:15px"><input type="checkbox" style="width:auto" ${QUICK?'checked':''} onchange="setQuick(this.checked)"> Quick mode — scanning an incubating block moves it to fruiting</label>
@@ -511,11 +512,11 @@ function idleCard(){
 function renderHome(){
   if(mode.type!=='stage'&&mode.type!=='loc')mode={type:station.block?'harvest':'lookup'};station.batch=null;
   if(station.block&&!db.blocks[station.block])station.block=null;if(station.batch&&!db.batches[station.batch])station.batch=null;
-  const b=db.blocks[station.block],sb=!b&&db.spawnBags[station.spawn];
+  const b=db.blocks[station.block],sb=!b&&db.spawnBags[station.spawn],cj=!b&&!sb&&db.cultureJars[station.culture];
   if(!ROLE){$('home').innerHTML=`<div class="card" style="max-width:560px;margin:16px auto">${roleChooser(false)}</div>`;return}
   const showScale=can('harvest')&&ROLE!=='lab';
-  $('home').innerHTML=showScale?`<div class="home"><div>${scaleBox()}</div><div>${b?blockCard(b):sb?spawnCard(sb):idleCard()}</div></div>`
-    :`<div style="max-width:720px;margin:0 auto">${b?blockCard(b):sb?spawnCard(sb):idleCard()}</div>`;
+  $('home').innerHTML=showScale?`<div class="home"><div>${scaleBox()}</div><div>${b?blockCard(b):sb?spawnCard(sb):cj?cultureCard(cj):idleCard()}</div></div>`
+    :`<div style="max-width:720px;margin:0 auto">${b?blockCard(b):sb?spawnCard(sb):cj?cultureCard(cj):idleCard()}</div>`;
   updateWeight();
 }
 
@@ -657,12 +658,12 @@ function createBatch(){
 /* ================= spawn bags ================= */
 const SPAWN_STAGES=['Colonizing','Ready','Used','Contaminated'];
 function batchDefault(S){const d=((db.settings.batchDefaults||{})[S])||{};return {n:d.n||25,w:d.w!=null?d.w:db.settings.lastBlockW??null}}
-function goSpawn(id){station.spawn=id;station.block=null;station.decision=false;station.finishing=false;if(mode.type!=='stage'&&mode.type!=='loc')mode={type:'lookup'};show('home')}
+function goSpawn(id){station.culture=null;station.spawn=id;station.block=null;station.decision=false;station.finishing=false;if(mode.type!=='stage'&&mode.type!=='loc')mode={type:'lookup'};show('home')}
 function deductSpawn(sb){const l=db.spawn.find(x=>x.id===sb.lotId);if(l&&l.bagWeight&&!sb.deducted){l.remaining=Math.max(0,(l.remaining??l.qty)-l.bagWeight/1000);sb.deducted=true}}
 function spawnStage(id,s){const b=db.spawnBags[id];if(b.stage===s)return;b.stage=s;b.stageHist.push({stage:s,t:Date.now(),op:op()});if(s==='Contaminated')deductSpawn(b);audit(`Spawn ${id} → ${s}`);save();ok();toast(`${id} → ${s}`);renderHome()}
 function spawnLotBags(lot){const bs=Object.values(db.spawnBags).filter(b=>b.lotId===lot);if(!bs.length)return '—';const c={};bs.forEach(b=>c[b.stage]=(c[b.stage]||0)+1);return SPAWN_STAGES.filter(x=>c[x]).map(x=>`${c[x]} ${x.toLowerCase()}`).join(', ')}
 function spawnLabel(id){const b=db.spawnBags[id],l=db.spawn.find(x=>x.id===b.lotId)||{};
-  return {code:id,title:id,lines:[{t:'SPAWN',s:0.12,b:true},{t:[l.species,l.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(l.date)),s:0.085}]}}
+  return {code:id,title:id,lines:[{t:l.gen==='Master'?'MASTER SPAWN':'SPAWN',s:0.12,b:true},{t:[l.species,l.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(l.date)),s:0.085}]}}
 function printSpawn(ids){ids=ids.filter(i=>db.spawnBags[i]);ids.forEach(i=>db.spawnBags[i].labelPrints=(db.spawnBags[i].labelPrints||0)+1);save();printItems(ids.map(spawnLabel))}
 /* ================= strains & genetics ================= */
 const strainName=x=>x?`${x.species}${x.strain?' — '+x.strain:''}`:'';
@@ -686,39 +687,125 @@ function strainsCard(){
    <div class="row"><input id="str_sp" list="spl3" placeholder="Species (e.g. Lion's Mane)" style="width:170px"><input id="str_st" placeholder="Strain name (e.g. Golden Comb)" style="width:190px"><input id="str_gen" placeholder="Genetics / source" style="flex:1;min-width:160px"><input id="str_no" placeholder="Notes" style="width:150px"><button class="btn" onclick="addStrainRow()">Add strain</button></div>
    <datalist id="spl3">${speciesAll().map(s=>`<option>${esc(s)}`).join('')}</datalist></div>`;
 }
-function strainPick(v){const n=v==='__new';$('ns_newstrain').style.display=n?'':'none';if(n)setTimeout(()=>{const e=$('ns_sp');if(e)e.focus()},0)}
+function strainPick(v,pf){pf=pf||'ns';const n=v==='__new';$(pf+'_newstrain').style.display=n?'':'none';if(n)setTimeout(()=>{const e=$(pf+'_sp');if(e)e.focus()},0)}
+function strainPicker(pf,pickId){
+  const list=db.strains.slice().sort((a,c)=>strainName(a).localeCompare(strainName(c))),last=db.strains.find(x=>x.id===(pickId||db.settings.lastStrain)),pick=last?last.id:(list.length?'':'__new');
+  return `<label>Strain<select id="${pf}_strain" onchange="strainPick(this.value,'${pf}')"><option value="" ${pick===''?'selected':''} disabled>Choose a strain…</option>${list.map(x=>`<option value="${x.id}" ${x.id===pick?'selected':''}>${esc(strainName(x))}${x.genetics?' · '+esc(x.genetics):''}</option>`).join('')}<option value="__new" ${pick==='__new'?'selected':''}>+ New strain…</option></select></label>
+  <div id="${pf}_newstrain" class="two" style="${pick==='__new'?'':'display:none'}"><label>Species<input id="${pf}_sp" list="spl2" placeholder="e.g. Blue Oyster"></label><label>Strain name<input id="${pf}_st" placeholder="optional"></label><label style="grid-column:1/-1">Genetics / source<input id="${pf}_gen" placeholder="optional — e.g. vendor, wild clone, parent culture"></label></div>
+  <datalist id="spl2">${speciesAll().map(x=>`<option>${esc(x)}`).join('')}</datalist>`;
+}
+function readStrain(pf){const sel=$(pf+'_strain').value;
+  if(sel==='__new'){if(!$(pf+'_sp').value.trim()){toast('Enter the species for the new strain');return null}return ensureStrain($(pf+'_sp').value,$(pf+'_st').value,$(pf+'_gen').value)}
+  const x=db.strains.find(y=>y.id===sel);if(!x)toast('Choose a strain');return x||null}
+const strainOf=o=>(o&&o.strainId&&db.strains.find(x=>x.id===o.strainId))||(o&&o.species?ensureStrain(o.species,o.strain):null);
+function spawnDefault(sid){const d=((db.settings.spawnDefaults||{})[sid])||{};return {n:d.n||db.settings.lastSpawnN||10,w:d.w!=null?d.w:db.settings.lastSpawnW??null}}
 
-function openNewSpawn(){
-  const list=db.strains.slice().sort((a,c)=>strainName(a).localeCompare(strainName(c))),last=db.strains.find(x=>x.id===db.settings.lastStrain),pick=last?last.id:(list.length?'':'__new');
-  dlg(`<h3 style="margin-top:0">Add spawn</h3>
-  <label>Strain<select id="ns_strain" onchange="strainPick(this.value)"><option value="" ${pick===''?'selected':''} disabled>Choose a strain…</option>${list.map(x=>`<option value="${x.id}" ${x.id===pick?'selected':''}>${esc(strainName(x))}${x.genetics?' · '+esc(x.genetics):''}</option>`).join('')}<option value="__new" ${pick==='__new'?'selected':''}>+ New strain…</option></select></label>
-  <div id="ns_newstrain" class="two" style="${pick==='__new'?'':'display:none'}"><label>Species<input id="ns_sp" list="spl2" placeholder="e.g. Blue Oyster"></label><label>Strain name<input id="ns_st" placeholder="optional"></label><label style="grid-column:1/-1">Genetics / source<input id="ns_gen" placeholder="optional — e.g. vendor, wild clone, parent culture"></label></div>
-  <div class="two"><label>How many spawn bags?<input id="ns_n" type="number" min="1" value="${db.settings.lastSpawnN||10}"></label><label>Weight per bag (${U()})<input id="ns_w" type="number" step="any" value="${db.settings.lastSpawnW!=null?wOut(db.settings.lastSpawnW):''}" placeholder="e.g. 3"></label></div>
+/* ---------- spawn ---------- */
+function openNewSpawn(pf){
+  pf=pf||{};const jar=pf.cultureJar&&db.cultureJars[pf.cultureJar],cl=jar?db.cultures.find(c=>c.id===jar.lotId):null,js=cl?strainOf(cl):null,d=spawnDefault(js?js.id:db.settings.lastStrain);
+  dlg(`<h3 style="margin-top:0">${jar?'Start master spawn':'Add spawn'}</h3>${jar?`<div class="alert info small">From liquid culture <b>${esc(jar.id)}</b> (lot ${esc(jar.lotId)}${cl&&cl.source?' · '+esc(cl.source):''})</div>`:''}
+  <input type="hidden" id="ns_cjar" value="${jar?esc(jar.id):''}">
+  ${strainPicker('ns',js&&js.id)}
+  <div class="two"><label>How many spawn bags?<input id="ns_n" type="number" min="1" value="${d.n}"></label><label>Weight per bag (${U()})<input id="ns_w" type="number" step="any" value="${d.w!=null?wOut(d.w):''}" placeholder="e.g. 3"></label></div>
   <label>Inoculated on<input id="ns_d" type="date" value="${dstr(Date.now())}"></label>
-  <datalist id="spl2">${speciesAll().map(s=>`<option>${esc(s)}`).join('')}</datalist>
   <details style="margin:8px 0"><summary class="muted" style="cursor:pointer">More details (optional)</summary><div class="two">
   <label>Spawn lot ID<input id="ns_id" value="S${db.settings.nextSpawn||1}"></label><label>Grain<input id="ns_g" placeholder="e.g. rye, millet"></label>
-  <label>From culture lot<select id="ns_c"><option value="">—</option>${db.cultures.map(c=>`<option value="${esc(c.id)}">${esc(c.id)} — ${esc(c.species)} ${esc(c.strain)}</option>`).join('')}</select></label></div>
+  <label>Generation<select id="ns_gen2"><option value="">—</option><option value="Master" ${jar?'selected':''}>Master (from culture)</option><option value="G2">G2 (from spawn)</option></select></label>
+  <label>From culture lot<select id="ns_c"><option value="">—</option>${db.cultures.map(c=>`<option value="${esc(c.id)}" ${cl&&cl.id===c.id?'selected':''}>${esc(c.id)} — ${esc(c.species)} ${esc(c.strain)}</option>`).join('')}</select></label></div>
   <label>Notes<textarea id="ns_no"></textarea></label></details>
   <div class="act"><button class="btn xl green" onclick="createSpawn()">Create spawn &amp; print labels</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`);
-  $('ns_c').onchange=e=>{const c=db.cultures.find(x=>x.id===e.target.value);if(!c)return;const x=ensureStrain(c.species,c.strain);if(![...$('ns_strain').options].some(o=>o.value===x.id)){save();return openNewSpawn()}$('ns_strain').value=x.id;strainPick(x.id)};
+  $('ns_c').onchange=e=>{const c=db.cultures.find(x=>x.id===e.target.value);if(!c)return;const x=strainOf(c);if(x&&![...$('ns_strain').options].some(o=>o.value===x.id)){save();return openNewSpawn(pf)}if(x){$('ns_strain').value=x.id;strainPick(x.id,'ns')}};
 }
-function createSpawn(){
-  const sel=$('ns_strain').value;let x;
-  if(sel==='__new'){if(!$('ns_sp').value.trim())return toast('Enter the species for the new strain');x=ensureStrain($('ns_sp').value,$('ns_st').value,$('ns_gen').value)}
-  else x=db.strains.find(y=>y.id===sel);
-  if(!x)return toast('Choose a strain');
-  const id=normId($('ns_id').value),n=Math.max(1,+$('ns_n').value||1),S=x.species;
-  if(!id)return toast('Spawn lot ID required');if(db.spawn.some(y=>y.id===id))return toast('Spawn lot '+id+' already exists');
-  const wv=+$('ns_w').value,w=wv>0?Math.round(wIn(wv)*10)/10:null,kg=w?Math.round(n*w)/1000:0;
-  const lot={id,cultureId:$('ns_c').value,species:S,strain:x.strain||'',strainId:x.id,genetics:x.genetics||'',date:$('ns_d').value,qty:kg,remaining:kg,bagWeight:w,grain:$('ns_g').value,notes:$('ns_no').value,bags:n};
+function makeSpawn(o){
+  const x=o.strain,id=normId(o.id||('S'+(db.settings.nextSpawn||1))),n=Math.max(1,+o.n||1),w=o.w;
+  if(!id){toast('Spawn lot ID required');return null}if(db.spawn.some(y=>y.id===id)){toast('Spawn lot '+id+' already exists');return null}
+  const jar=o.cultureJar&&db.cultureJars[o.cultureJar],cl=jar?db.cultures.find(c=>c.id===jar.lotId):db.cultures.find(c=>c.id===o.cultureId),kg=w?Math.round(n*w)/1000:0;
+  const lot={id,cultureId:cl?cl.id:'',cultureJar:jar?jar.id:'',gen:o.gen||(jar?'Master':''),species:x.species,strain:x.strain||'',strainId:x.id,genetics:x.genetics||(cl&&cl.source)||'',
+    date:o.date||dstr(Date.now()),qty:kg,remaining:kg,bagWeight:w,grain:o.grain||'',notes:o.notes||'',bags:n,created:Date.now()};
   db.spawn.push(lot);const t=pdate(lot.date)||Date.now(),ids=[];
-  for(let i=1;i<=n;i++){const bid=`${id}-${String(i).padStart(n>99?3:2,'0')}`;if(db.spawnBags[bid]||db.blocks[bid])continue;
+  for(let i=1;i<=n;i++){const bid=`${id}-${String(i).padStart(n>99?3:2,'0')}`;if(db.spawnBags[bid]||db.blocks[bid]||db.cultureJars[bid])continue;
     db.spawnBags[bid]={id:bid,lotId:id,stage:'Colonizing',stageHist:[{stage:'Colonizing',t,op:op()}],created:Date.now(),batches:[],labelPrints:0,notes:''};ids.push(bid)}
   const m=id.match(/^S(\d+)$/);if(m)db.settings.nextSpawn=Math.max(+db.settings.nextSpawn||1,+m[1]+1);
   if(w)db.settings.lastSpawnW=w;db.settings.lastSpawnN=n;db.settings.lastStrain=x.id;
-  audit(`Created spawn lot ${id} (${n} bags of ${strainName(x)})`);save();closeDlg();toast(`Spawn ${id}: ${n} bags created`);
-  station.block=null;station.spawn=null;show('home');printSpawn(ids);
+  db.settings.spawnDefaults=db.settings.spawnDefaults||{};db.settings.spawnDefaults[x.id]={n,w};
+  if(jar){jar.uses=jar.uses||[];jar.uses.push(id);if(jar.stage==='Growing'){jar.stage='Ready';jar.stageHist.push({stage:'Ready',t:Date.now(),op:op()})}}
+  audit(`Created ${lot.gen==='Master'?'master ':''}spawn lot ${id} (${n} bags of ${strainName(x)})${jar?' from culture '+jar.id:''}`);save();toast(`${lot.gen==='Master'?'Master spawn':'Spawn'} ${id}: ${ids.length} bags created`);
+  return {lot,ids};
+}
+function createSpawn(){
+  const x=readStrain('ns');if(!x)return;const wv=+$('ns_w').value;
+  const r=makeSpawn({strain:x,id:$('ns_id').value,n:$('ns_n').value,w:wv>0?Math.round(wIn(wv)*10)/10:null,date:$('ns_d').value,grain:$('ns_g').value,notes:$('ns_no').value,
+    gen:$('ns_gen2').value,cultureJar:$('ns_cjar').value,cultureId:$('ns_c').value});
+  if(!r)return;closeDlg();station.block=null;if(!$('ns_cjar')||!r.lot.cultureJar)station.spawn=null;show('home');printSpawn(r.ids);
+}
+function quickSpawn(jarId){
+  const jar=db.cultureJars[jarId],cl=db.cultures.find(c=>c.id===jar.lotId)||{},x=strainOf(cl),d=spawnDefault(x&&x.id);
+  if(!x||d.w==null)return openNewSpawn({cultureJar:jarId});
+  const r=makeSpawn({strain:x,n:d.n,w:d.w,cultureJar:jarId});if(!r)return;renderHome();printSpawn(r.ids);
+}
+
+/* ---------- liquid cultures ---------- */
+const LC_STAGES=['Growing','Ready','Empty','Contaminated'];
+function goCulture(id){station.culture=id;station.spawn=null;station.block=null;station.decision=false;station.finishing=false;if(mode.type!=='stage'&&mode.type!=='loc')mode={type:'lookup'};show('home')}
+function cultureLabel(id){const j=db.cultureJars[id],c=db.cultures.find(x=>x.id===j.lotId)||{};
+  return {code:id,title:id,lines:[{t:'LIQUID CULTURE',s:0.11,b:true},{t:[c.species,c.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(c.date)),s:0.085}]}}
+function printCulture(ids){ids=ids.filter(i=>db.cultureJars[i]);ids.forEach(i=>db.cultureJars[i].labelPrints=(db.cultureJars[i].labelPrints||0)+1);save();printItems(ids.map(cultureLabel))}
+function cultureLotJars(lot){const js=Object.values(db.cultureJars).filter(j=>j.lotId===lot);if(!js.length)return '—';const c={};js.forEach(j=>c[j.stage]=(c[j.stage]||0)+1);return LC_STAGES.filter(x=>c[x]).map(x=>`${c[x]} ${x.toLowerCase()}`).join(', ')}
+function openNewCulture(){
+  dlg(`<h3 style="margin-top:0">Add liquid culture</h3>
+  ${strainPicker('nc')}
+  <div class="two"><label>How many jars / syringes?<input id="nc_n" type="number" min="1" value="${db.settings.lastLcN||4}"></label><label>Volume each (ml)<input id="nc_v" type="number" step="any" value="${db.settings.lastLcV||500}"></label></div>
+  <label>Made on<input id="nc_d" type="date" value="${dstr(Date.now())}"></label>
+  <label>Source<input id="nc_src" placeholder="e.g. agar plate A3, vendor syringe, parent culture LC2"></label>
+  <details style="margin:8px 0"><summary class="muted" style="cursor:pointer">More details (optional)</summary><div class="two">
+  <label>Culture lot ID<input id="nc_id" value="LC${db.settings.nextLc||1}"></label><label>Media recipe<input id="nc_med" placeholder="e.g. 4% honey water" value="${esc(db.settings.lastLcMedia||'')}"></label></div>
+  <label>Notes<textarea id="nc_no"></textarea></label></details>
+  <div class="act"><button class="btn xl green" onclick="createCulture()">Create culture &amp; print labels</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`);
+}
+function createCulture(){
+  const x=readStrain('nc');if(!x)return;const id=normId($('nc_id').value),n=Math.max(1,+$('nc_n').value||1),v=+$('nc_v').value||null;
+  if(!id)return toast('Culture lot ID required');if(db.cultures.some(c=>c.id===id))return toast('Culture lot '+id+' already exists');
+  const c={id,type:'LC',species:x.species,strain:x.strain||'',strainId:x.id,date:$('nc_d').value,source:$('nc_src').value.trim(),media:$('nc_med').value.trim(),volume:v,jars:n,notes:$('nc_no').value,status:'Active',created:Date.now()};
+  db.cultures.push(c);const t=pdate(c.date)||Date.now(),ids=[];
+  for(let i=1;i<=n;i++){const jid=`${id}-${String(i).padStart(n>99?3:2,'0')}`;if(db.cultureJars[jid]||db.spawnBags[jid]||db.blocks[jid])continue;
+    db.cultureJars[jid]={id:jid,lotId:id,stage:'Growing',stageHist:[{stage:'Growing',t,op:op()}],created:Date.now(),uses:[],labelPrints:0,notes:''};ids.push(jid)}
+  const m=id.match(/^LC(\d+)$/);if(m)db.settings.nextLc=Math.max(+db.settings.nextLc||1,+m[1]+1);
+  db.settings.lastLcN=n;if(v)db.settings.lastLcV=v;db.settings.lastLcMedia=c.media;db.settings.lastStrain=x.id;
+  audit(`Created liquid culture ${id} (${n} × ${strainName(x)})`);save();closeDlg();toast(`Culture ${id}: ${ids.length} labels`);
+  station.block=null;station.spawn=null;station.culture=null;show('home');printCulture(ids);
+}
+function cultureStage(id,s){const j=db.cultureJars[id];if(!j||j.stage===s)return;j.stage=s;j.stageHist.push({stage:s,t:Date.now(),op:op()});audit(`Culture ${id} → ${s}`);
+  const c=db.cultures.find(x=>x.id===j.lotId);if(c&&Object.values(db.cultureJars).filter(x=>x.lotId===c.id).every(x=>x.stage==='Empty'||x.stage==='Contaminated'))c.status='Retired';
+  save();ok();toast(`${id} → ${s}`);renderHome()}
+function delCultureJar(id){const j=db.cultureJars[id];if(!j)return;if(!confirm(`Delete culture ${id}?${(j.uses||[]).length?` It was used for spawn ${j.uses.join(', ')} — that spawn keeps its record.`:''} This can't be undone.`))return;
+  delete db.cultureJars[id];const c=db.cultures.find(x=>x.id===j.lotId);if(c){c.jars=Math.max(0,(c.jars||1)-1);if(!Object.values(db.cultureJars).some(x=>x.lotId===c.id))db.cultures=db.cultures.filter(x=>x.id!==c.id)}
+  audit('Deleted culture '+id);save();toast(id+' deleted');if(station.culture===id)station.culture=null;render()}
+function delCultureLot(id){const js=Object.values(db.cultureJars).filter(j=>j.lotId===id);if(!confirm(`Delete culture lot ${id}${js.length?` and its ${js.length} label${js.length===1?'':'s'}`:''}? Spawn made from it keeps its record. This can't be undone.`))return;
+  js.forEach(j=>delete db.cultureJars[j.id]);db.cultures=db.cultures.filter(x=>x.id!==id);audit('Deleted culture lot '+id);save();toast('Culture lot '+id+' deleted');
+  if(station.culture&&!db.cultureJars[station.culture])station.culture=null;render()}
+function cultureCard(j){
+  const c=db.cultures.find(x=>x.id===j.lotId)||{},x=strainOf(c),st=j.stage,age=Math.floor((Date.now()-j.stageHist[0].t)/DAY),d=spawnDefault(x&&x.id),uses=j.uses||[];
+  const quick=d.w!=null?`${d.n} bags × ${fmtW(d.w)}`:'set up spawn';let body;
+  if(!can('lab'))body=`<div class="alert info">Liquid culture — ${st.toLowerCase()}. Handled in the lab.</div>`;
+  else if(st==='Contaminated')body=`<div class="alert">Marked contaminated ${fmtDay(j.stageHist[j.stageHist.length-1].t)}.</div>`;
+  else if(st==='Empty')body=`<div class="alert info">Used up${uses.length?` — made spawn ${uses.map(u=>esc(u)).join(', ')}`:''}.</div>`;
+  else body=`${uses.length?`<div class="alert ok">Already made spawn ${uses.map(u=>`<b>${esc(u)}</b>`).join(', ')}</div>`:''}
+    <div class="act"><button class="btn xl green" onclick="quickSpawn('${j.id}')">${uses.length?'Start more master spawn':'Start master spawn'} · ${quick}</button>
+    ${st==='Growing'?`<button class="btn xl alt" onclick="cultureStage('${j.id}','Ready')">Fully grown — ready</button>`:''}
+    ${uses.length?`<button class="btn xl alt" onclick="cultureStage('${j.id}','Empty')">Jar is empty</button>`:''}
+    <button class="btn xl danger" onclick="if(confirm('Mark ${j.id} as contaminated?'))cultureStage('${j.id}','Contaminated')">Contaminated</button></div>
+    <p class="small muted">Spawn gets this culture's strain and genetics. <a href="#" onclick="openNewSpawn({cultureJar:'${j.id}'});return false">Change bag count, weight or details</a></p>`;
+  return `<div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:flex-start"><div><div class="bigid">${esc(j.id)}</div><div class="muted">Liquid culture · ${esc(c.species||'')} ${esc(c.strain||'')}${x&&x.genetics?` <span class="tag">${esc(x.genetics)}</span>`:''}</div></div><span class="pill ${st==='Contaminated'?'r':st==='Ready'?'g':''}">${st}</span></div>
+   <div class="small muted" style="margin:6px 0 14px">Lot ${esc(j.lotId)} · made ${fmtDay(j.stageHist[0].t)} · day ${age}${c.volume?' · '+c.volume+' ml':''}${c.media?' · '+esc(c.media):''}${c.source?' · from '+esc(c.source):''}</div>${body}
+   <div class="row" style="margin-top:16px;justify-content:space-between"><span class="chips">${can('lab')?`<button class="chip" onclick="printCulture(['${j.id}'])">Reprint label</button><button class="chip" onclick="if(confirm('Delete just ${j.id}? (Cancel to delete the whole lot instead)'))delCultureJar('${j.id}');else delCultureLot('${esc(j.lotId)}')">Delete…</button>`:''}</span>
+   <button class="btn alt" onclick="station.culture=null;renderHome()">Done</button></div></div>`;
+}
+function culturesCard(){
+  const list=db.cultures.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  return `<div class="card"><b>Liquid cultures</b><div class="scroll"><table><tr><th>Lot</th><th>Strain</th><th>Made</th><th>Source</th><th>Media</th><th class="n">Volume</th><th>Jars</th><th>Spawn made</th><th></th></tr>
+   ${list.map(c=>{const js=Object.values(db.cultureJars).filter(j=>j.lotId===c.id),made=[...new Set(js.flatMap(j=>j.uses||[]))];
+     return `<tr><td><b>${esc(c.id)}</b></td><td>${esc(c.species)} ${esc(c.strain)}</td><td>${fmtDay(pdate(c.date))}</td><td>${esc(c.source||'')}</td><td>${esc(c.media||'')}</td><td class="n">${c.volume?c.volume+' ml':'—'}</td><td>${cultureLotJars(c.id)}</td><td>${made.map(esc).join(', ')||'—'}</td><td>${can('lab')?`<button class="chip" onclick="delCultureLot('${esc(c.id)}')">✕</button>`:''}</td></tr>`}).join('')||'<tr><td colspan="9" class="muted">No cultures yet.</td></tr>'}</table></div>
+   <div class="row"><button class="btn" onclick="openNewCulture()">+ Add liquid culture</button><span class="small muted">Each jar gets its own label. Scan one on the home screen to start master spawn from it.</span></div></div>`;
 }
 function quickBatch(bagId){
   const sb=db.spawnBags[bagId],l=db.spawn.find(x=>x.id===sb.lotId)||{},d=batchDefault(l.species);
@@ -751,8 +838,8 @@ function spawnCard(sb){
     ${st==='Colonizing'?`<button class="btn xl alt" onclick="spawnStage('${sb.id}','Ready')">Fully colonized — ready</button>`:''}
     <button class="btn xl danger" onclick="if(confirm('Mark ${sb.id} as contaminated?'))spawnStage('${sb.id}','Contaminated')">Contaminated</button></div>
     ${can('lab')?`<p class="small muted">Inoculation date is today. <a href="#" onclick="openNewBatch({spawnBag:'${sb.id}'});return false">Change count, weight or details</a></p>`:''}`;
-  return `<div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:flex-start"><div><div class="bigid">${esc(sb.id)}</div><div class="muted">Spawn · ${esc(l.species||'')} ${esc(l.strain||'')}${l.genetics?` <span class="tag">${esc(l.genetics)}</span>`:''}</div></div><span class="pill ${st==='Contaminated'?'r':st==='Ready'?'g':''}">${st}</span></div>
-   <div class="small muted" style="margin:6px 0 14px">Lot ${esc(sb.lotId)} · made ${fmtDay(sb.stageHist[0].t)} · day ${age}${l.bagWeight?' · '+fmtW(l.bagWeight):''}${l.cultureId?' · culture '+esc(l.cultureId):''}</div>${body}
+  return `<div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:flex-start"><div><div class="bigid">${esc(sb.id)}</div><div class="muted">${l.gen==='Master'?'Master spawn':'Spawn'} · ${esc(l.species||'')} ${esc(l.strain||'')}${l.genetics?` <span class="tag">${esc(l.genetics)}</span>`:''}</div></div><span class="pill ${st==='Contaminated'?'r':st==='Ready'?'g':''}">${st}</span></div>
+   <div class="small muted" style="margin:6px 0 14px">Lot ${esc(sb.lotId)} · made ${fmtDay(sb.stageHist[0].t)} · day ${age}${l.bagWeight?' · '+fmtW(l.bagWeight):''}${l.cultureJar?` · from <a href="#" onclick="goCulture('${esc(l.cultureJar)}');return false">${esc(l.cultureJar)}</a>`:l.cultureId?' · culture '+esc(l.cultureId):''}</div>${body}
    <div class="row" style="margin-top:16px;justify-content:space-between"><span class="chips">${can('lab')?`<button class="chip" onclick="printSpawn(['${sb.id}'])">Reprint label</button><button class="chip" onclick="askDelSpawn('${sb.id}')">Delete…</button>`:''}</span>
    <button class="btn alt" onclick="station.spawn=null;renderHome()">Done</button></div></div>`;
 }
@@ -764,7 +851,7 @@ function openBatch(id){
   const bt=db.batches[id];if(!bt)return;const bl=batchBlocks(id),st=bl.map(blockStats),cul=db.cultures.find(c=>c.id===bt.cultureLot),sl=db.spawn.find(s=>s.id===bt.spawnLot);
   dlg(`<div class="row" style="margin:0;justify-content:space-between"><div class="bigid">Batch ${esc(id)}</div><span class="tag ${batchStatus(bt)==='active'?'m':''}">${batchStatus(bt)}</span></div>
   <p class="muted">${esc(bt.species)} ${esc(bt.strain)} · ${bl.length}/${bt.count} blocks · operator ${esc(bt.operator)}</p>
-  <div class="alert info small"><b>Traceability:</b> Culture ${esc(bt.cultureLot||'—')}${cul?` (${esc(cul.species)} ${esc(cul.strain)}, ${fmtDay(pdate(cul.date))})`:''} → Spawn ${esc(bt.spawnLot||'—')}${sl?` (made ${fmtDay(pdate(sl.date))})`:''}${bt.spawnBag?` → Spawn bag ${esc(bt.spawnBag)}`:''} → Batch ${esc(id)} → ${bl.length} blocks</div>
+  <div class="alert info small"><b>Traceability:</b> Culture ${esc(bt.cultureLot||'—')}${cul?` (${esc(cul.species)} ${esc(cul.strain)}, ${fmtDay(pdate(cul.date))})`:''} ${sl&&sl.cultureJar?`→ Culture jar ${esc(sl.cultureJar)} `:''}→ ${sl&&sl.gen==='Master'?'Master spawn':'Spawn'} ${esc(bt.spawnLot||'—')}${sl?` (made ${fmtDay(pdate(sl.date))})`:''}${bt.spawnBag?` → Spawn bag ${esc(bt.spawnBag)}`:''} → Batch ${esc(id)} → ${bl.length} blocks</div>
   <div class="two small"><div>Recipe: <b>${esc(bt.recipe||'—')}${bt.recipeVer?' v'+esc(bt.recipeVer):''}</b></div><div>Inoculation rate: <b>${esc(bt.inocRate||'—')}${bt.inocRate?'%':''}</b>${bt.spawnUsed?` · ${r1(bt.spawnUsed)} kg spawn`:''}</div>
   <div>Prepared ${fmtDay(pdate(bt.prepDate))} · Sterilized ${fmtDay(pdate(bt.sterilDate))}</div><div>Inoculated <b>${fmtDay(pdate(bt.inocDate))}</b> · Dry substrate ${bt.dryWeight?bt.dryWeight+' g':'—'}</div></div>
   ${bt.ingredients?`<p class="small"><b>Ingredients:</b> ${esc(bt.ingredients)}</p>`:''}
@@ -782,9 +869,7 @@ function openBatch(id){
 
 /* ================= inventory ================= */
 function renderInventory(){
-  $('inventory').innerHTML=`${strainsCard()}<div class="card"><b>Culture lots</b><div class="scroll"><table><tr><th>Lot</th><th>Species / strain</th><th>Date</th><th>Source / parent</th><th>Status</th><th>Notes</th></tr>
-   ${db.cultures.map(c=>`<tr><td><b>${esc(c.id)}</b></td><td>${esc(c.species)} ${esc(c.strain)}</td><td>${fmtDay(pdate(c.date))}</td><td>${esc(c.source)}</td><td><select onchange="db.cultures.find(x=>x.id==='${c.id}').status=this.value;save()">${['Active','Expanded','Retired'].map(s=>`<option ${c.status===s?'selected':''}>${s}</option>`).join('')}</select></td><td>${esc(c.notes)}</td></tr>`).join('')}</table></div>
-   <div class="row"><input id="cu_id" placeholder="Lot ID" style="width:100px"><input id="cu_sp" placeholder="Species" style="width:120px"><input id="cu_st" placeholder="Strain" style="width:130px"><input id="cu_d" type="date" value="${dstr(Date.now())}"><input id="cu_src" placeholder="Source / parent lot" style="width:150px"><input id="cu_n" placeholder="Notes"><button class="btn" onclick="addCulture()">Add</button></div></div>
+  $('inventory').innerHTML=`${strainsCard()}${culturesCard()}
   <div class="card"><b>Spawn lots</b><div class="scroll"><table><tr><th>Lot</th><th>From culture</th><th>Species / strain</th><th>Made</th><th class="n">Made (kg)</th><th class="n">Remaining (kg)</th><th>Notes</th><th>Bags</th><th></th></tr>
    ${db.spawn.map(s=>`<tr><td><b>${esc(s.id)}</b></td><td>${esc(s.cultureId||'—')}</td><td>${esc(s.species)} ${esc(s.strain)}</td><td>${fmtDay(pdate(s.date))}</td><td class="n">${r1(s.qty)}</td><td class="n"><input type="number" step="any" value="${r1(s.remaining??s.qty)}" style="width:80px" onchange="db.spawn.find(x=>x.id==='${s.id}').remaining=+this.value;save()"></td><td>${esc(s.notes)}</td><td>${spawnLotBags(s.id)}</td><td>${can('lab')?`<button class="chip" title="Delete this spawn lot" onclick="delSpawnLot('${esc(s.id)}')">✕</button>`:''}</td></tr>`).join('')}</table></div>
    <div class="row"><button class="btn" onclick="openNewSpawn()">+ Add spawn bags</button><span class="small muted">Each bag gets its own label. Scan a bag on the home screen to start a batch from it.</span></div></div>
@@ -1101,6 +1186,7 @@ function labelItemsFor(sel){
     ...STAGES.filter(s=>s!=='Closed').map(s=>({code:'ACT:STAGE:'+s.toUpperCase(),title:'→ '+s,lines:['Move scanned blocks']})),
     {code:'ACT:RECORD',title:'Record',lines:['Save current weight']},{code:'ACT:CONTINUE',title:'Continue flush',lines:['After a harvest']},{code:'ACT:RECOVER',title:'Recovery',lines:['Next flush']},{code:'ACT:CLOSE',title:'Close out',lines:['After a harvest']}];
   if(sel==='locations'){const out=[],rk=+($('lr')?.value||0),sh=+($('ls')?.value||0);db.settings.rooms.forEach(r=>{if(!rk)out.push({code:'ACT:LOC:'+r,title:r,lines:['Location']});for(let i=1;i<=rk;i++){if(!sh)out.push({code:`ACT:LOC:${r}/${i}`,title:`${r} · Rack ${i}`,lines:['Location']});for(let j=1;j<=sh;j++)out.push({code:`ACT:LOC:${r}/${i}/${j}`,title:`${r} R${i} S${j}`,lines:['Location']})}});return out}
+  if(sel.startsWith('culture:'))return Object.values(db.cultureJars).filter(j=>j.lotId===sel.slice(8)).map(j=>cultureLabel(j.id));
   if(sel.startsWith('spawn:'))return Object.values(db.spawnBags).filter(b=>b.lotId===sel.slice(6)).map(b=>spawnLabel(b.id));
   if(sel.startsWith('batch:'))return batchBlocks(sel.slice(6)).map(b=>blockLabel(b.id));
   return [];
@@ -1109,7 +1195,7 @@ function renderLabels(){
   const LW=+db.settings.labelW||50,LH=+db.settings.labelH||30,bts=Object.values(db.batches).sort((a,c)=>c.created-a.created);
   if(!labelSel)labelSel=bts[0]?'batch:'+bts[0].id:'actions';
   const items=labelItemsFor(labelSel);
-  $('labels').innerHTML=`<div class="row"><select onchange="labelSel=this.value;renderLabels()">${bts.map(b=>`<option value="batch:${b.id}" ${labelSel==='batch:'+b.id?'selected':''}>Batch ${esc(b.id)} — ${esc(b.species)}</option>`).join('')}${db.spawn.filter(l=>Object.values(db.spawnBags).some(b=>b.lotId===l.id)).slice().reverse().map(l=>`<option value="spawn:${esc(l.id)}" ${labelSel==='spawn:'+l.id?'selected':''}>Spawn ${esc(l.id)} — ${esc(l.species)}</option>`).join('')}<option value="actions" ${labelSel==='actions'?'selected':''}>Scanner action cards</option><option value="locations" ${labelSel==='locations'?'selected':''}>Location labels</option></select>
+  $('labels').innerHTML=`<div class="row"><select onchange="labelSel=this.value;renderLabels()">${bts.map(b=>`<option value="batch:${b.id}" ${labelSel==='batch:'+b.id?'selected':''}>Batch ${esc(b.id)} — ${esc(b.species)}</option>`).join('')}${db.spawn.filter(l=>Object.values(db.spawnBags).some(b=>b.lotId===l.id)).slice().reverse().map(l=>`<option value="spawn:${esc(l.id)}" ${labelSel==='spawn:'+l.id?'selected':''}>Spawn ${esc(l.id)} — ${esc(l.species)}</option>`).join('')}${db.cultures.filter(c=>Object.values(db.cultureJars).some(j=>j.lotId===c.id)).slice().reverse().map(c=>`<option value="culture:${esc(c.id)}" ${labelSel==='culture:'+c.id?'selected':''}>Culture ${esc(c.id)} — ${esc(c.species)}</option>`).join('')}<option value="actions" ${labelSel==='actions'?'selected':''}>Scanner action cards</option><option value="locations" ${labelSel==='locations'?'selected':''}>Location labels</option></select>
    <button class="btn" onclick="${labelSel.startsWith('batch:')?`printBlocks(batchBlocks('${labelSel.slice(6)}').map(b=>b.id),true)`:`printItems(labelItemsFor(labelSel))`}">Print ${items.length}</button></div>
    ${labelSel==='locations'?`<div class="row"><span class="muted small">Racks per room</span><input id="lr" type="number" min="0" value="0" style="width:70px" onchange="renderLabels()"><span class="muted small">Shelves per rack</span><input id="ls" type="number" min="0" value="0" style="width:70px" onchange="renderLabels()"><span class="small muted">Rooms come from Settings.</span></div>`:''}
    <div class="row"><span class="muted small">Label size (mm):</span><input type="number" value="${LW}" style="width:70px" onchange="db.settings.labelW=+this.value;save();renderLabels()"> × <input type="number" value="${LH}" style="width:70px" onchange="db.settings.labelH=+this.value;save();renderLabels()">
