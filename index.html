@@ -75,13 +75,13 @@ dialog::backdrop{background:#0006}
 </head>
 <body>
 <header>
-  <h1 style="cursor:pointer" onclick="station.block=null;show('home')">🍄 Fungatory</h1><span id="syncStat" class="small muted" style="cursor:pointer;white-space:nowrap" onclick="syncClick()"></span>
+  <h1 style="cursor:pointer" onclick="station.block=null;show('home')">🍄 Fungatory</h1><button id="roleChip" class="chip" onclick="chooseRole()" style="display:none"></button><span id="syncStat" class="small muted" style="cursor:pointer;white-space:nowrap" onclick="syncClick()"></span>
   <nav id="nav">
     <button data-t="home" class="on">Home</button><button id="moreBtn" onclick="toggleMore()">More ▾<span id="taskBadge"></span></button><span id="moreNav"><button data-t="dash">Dashboard</button><button data-t="blocks">Blocks</button><button data-t="batches">Batches</button><button data-t="inventory">Inventory</button><button data-t="planning">Planning</button><button data-t="tasks">Tasks</button><button data-t="labels">Labels</button><button data-t="settings">Settings</button></span>
   </nav>
   <select id="opSel" title="Operator"></select>
   <input id="scanbox" placeholder="Scan or type a block ID…" autocomplete="off">
-  <button class="btn alt" onclick="openNewSpawn()">+ Add spawn</button><button class="btn" onclick="openNewBatch()">+ Add batch</button>
+  <span id="addBtns" style="display:contents"><button class="btn alt" onclick="openNewSpawn()">+ Add spawn</button><button class="btn" onclick="openNewBatch()">+ Add batch</button></span>
 </header>
 <div id="modebar"></div>
 <main>
@@ -250,6 +250,20 @@ function speciesAll(){return [...new Set([...Object.values(db.batches).map(b=>b.
 function lead(S){return Object.assign({},LEAD_DEFAULT,db.lead[S]||{})}
 
 /* ================= navigation ================= */
+const ROLES={
+  lab:{icon:'🧪',name:'Lab',desc:'Make spawn, start batches from spawn bags, print labels.'},
+  grow:{icon:'🌱',name:'Incubation / Fruiting',desc:'Move blocks into fruiting, mark contamination, finish blocks.'},
+  harvest:{icon:'⚖️',name:'Harvesting',desc:'Scan a block, set mushrooms on the scale. Nothing else.'},
+  all:{icon:'🗂',name:'Office — everything',desc:'All screens: dashboards, planning, tasks, settings.'}};
+let ROLE=null,QUICK=false;try{ROLE=localStorage.getItem('fungatory-role');QUICK=localStorage.getItem('fungatory-quick')==='1'}catch(e){}
+if(ROLE&&!ROLES[ROLE])ROLE=null;
+const can=(...rs)=>!ROLE||ROLE==='all'||rs.includes(ROLE);
+function setRole(r){ROLE=r;try{localStorage.setItem('fungatory-role',r)}catch(e){}closeDlg();station.block=null;station.spawn=null;show('home')}
+function chooseRole(){dlg(roleChooser(true))}
+function roleChooser(inDlg){return `<h3 style="margin-top:0">Which room is this device in?</h3><p class="muted small" style="margin-top:0">This device will only show what that room needs. You can change it any time from the button at the top.</p>
+  <div class="act">${Object.entries(ROLES).map(([k,r])=>`<button class="btn xl ${k===ROLE?'green':'alt'}" style="text-align:left" onclick="setRole('${k}')">${r.icon} ${r.name}<div class="small" style="font-weight:400;opacity:.8">${r.desc}</div></button>`).join('')}
+  ${inDlg?'<button class="btn alt" onclick="closeDlg()">Cancel</button>':''}</div>`}
+function setQuick(v){QUICK=v;try{localStorage.setItem('fungatory-quick',v?'1':'0')}catch(e){}renderHome()}
 let tab='home',mode={type:'lookup'},station={batch:null,block:null,decision:false,finishing:false,last:null},MS={},moreOpen=false;
 function toggleMore(){moreOpen=!moreOpen;$('moreNav').classList.toggle('open',moreOpen)}
 $('nav').onclick=e=>{const b=e.target.closest('button');if(b&&b.dataset.t)show(b.dataset.t)};
@@ -257,6 +271,9 @@ function show(t){tab=t;if((t!=='home')!==moreOpen)toggleMore();
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===t));render()}
 function render(){MS={};genTasks();renderHeader();renderMode();({home:renderHome,dash:renderDash,blocks:renderBlocks,batches:renderBatches,inventory:renderInventory,planning:renderPlanning,tasks:renderTasks,labels:renderLabels,settings:renderSettings})[tab]()}
 function renderHeader(){
+  const r=ROLES[ROLE],full=!ROLE||ROLE==='all';$('roleChip').style.display=ROLE?'':'none';$('roleChip').innerHTML=r?`${r.icon} ${r.name} ▾`:'';
+  $('addBtns').style.display=full||ROLE==='lab'?'contents':'none';$('moreBtn').style.display=full?'':'none';
+  document.querySelector('nav [data-t="home"]').style.display=full?'':'none';if(!full&&moreOpen)toggleMore();
   $('opSel').style.display=db.settings.operators.length>1?'':'none';
   $('opSel').innerHTML=db.settings.operators.map(o=>`<option ${o===op()?'selected':''}>${esc(o)}</option>`).join('');
   const due=db.tasks.filter(t=>t.status==='open'&&t.due<=today0()+DAY-1).length;$('taskBadge').innerHTML=due?`<span class="badge">${due}</span>`:'';
@@ -295,6 +312,7 @@ function handleScan(raw){
   const m=mode.type;
   if(m==='stage'){if(b.stage==='Closed')return toast(id+' is closed');blockStage(id,mode.arg,true);beep();toast(id+' → '+mode.arg)}
   else if(m==='loc'){moveLoc(b,mode.arg);save();beep();toast(id+' → '+mode.arg);render()}
+  else if(ROLE==='grow'&&QUICK&&(b.stage==='Inoculated'||b.stage==='Incubating')){setStage(b,'Fruiting');save();ok();toast(`${id} → Fruiting`);goBlock(id)}
   else{beep();goBlock(id)}
 }
 
@@ -342,6 +360,7 @@ function demoScale(){if(demoT){clearInterval(demoT);demoT=null;connLabel('Not co
 function autoCheck(){
   const g=net();if(g==null)return;
   if(g<(+db.settings.rearm||30)){armed=true;stableSince=0;return}
+  if(!can('harvest')){stableSince=0;return}
   if(!armed||!scale.stable||tab!=='home'||$('dlg').open){if(!scale.stable)stableSince=0;return}
   const m=mode.type,b=db.blocks[station.block],bt=db.batches[station.batch];
   if(m==='start'&&(!db.settings.autoStart||!bt||!nextStartTarget(bt)||g<(+db.settings.captureMin||0)))return;
@@ -416,23 +435,31 @@ function scaleBox(){
 }
 const W=()=>{const g=net();return g!=null&&g>0?fmtW(g):'—'};
 function blockCard(b){
-  const s=blockStats(b),bt=batchOf(b),st=b.stage;let body;
+  const s=blockStats(b),bt=batchOf(b),st=b.stage,inc=st==='Inoculated'||st==='Incubating';let body;
+  const note=t=>`<div class="alert info">${t}</div>`;
   if(st==='Closed')body=`<div class="alert">Finished ${fmtDay(b.closure.t)} — ${esc(b.closure.reason)}${b.finalWeight?' · final weight '+fmtW(b.finalWeight):''}</div>`;
-  else if(station.finishing)body=`<p><b>Finishing this block.</b> Set the spent block on the scale if you want its final weight saved, then tap why:</p>
+  else if(station.finishing)body=`<p><b>Finishing this block.</b> ${can('harvest')?'Set the spent block on the scale if you want its final weight saved, then tap why:':'Tap why:'}</p>
     <div class="act">${REASONS.map(r=>`<button class="btn xl ${r==='Exhausted'?'':'danger'}" onclick="finalClose('${r}')">${r==='Exhausted'?'Spent — done producing':r}</button>`).join('')}<button class="btn alt" onclick="station.finishing=false;renderHome()">Cancel</button></div>`;
   else if(station.decision){const hs=blockHarvests(b.id),h=hs[hs.length-1];
     body=`<div class="alert ok">Saved <b>${fmtW(h&&h.grams)}</b> — flush ${h&&h.flush}, pick ${h&&h.pick}. <button class="chip" onclick="undoHarvest()">Undo</button></div><p><b>What next?</b></p>
     <div class="act"><button class="btn xl alt" onclick="decide('continue')">More to pick (same flush)</button><button class="btn xl green" onclick="decide('recover')">Flush done — let it rest</button><button class="btn xl danger" onclick="decide('close')">Block finished</button></div>`}
   else{const a=[];
-    if(b.startWeight==null&&!s.hs.length)a.push(`<button class="btn xl" onclick="saveStart('${b.id}')">Save starting weight · <span class="wlive">${W()}</span></button>`);
-    if(st==='Inoculated'||st==='Incubating'){a.push(`<button class="btn xl green" onclick="stageGo('${b.id}','Fruiting')">Move to fruiting</button>`);a.push(`<button class="btn xl danger" onclick="station.finishing=true;renderHome()">Contaminated / remove</button>`)}
-    else{a.push(`<button class="btn xl green" onclick="recordHarvest()">Record harvest · <span class="wlive">${W()}</span></button>`);
-      if(st==='Between flushes')a.push(`<button class="btn xl alt" onclick="stageGo('${b.id}','Fruiting')">Back to fruiting</button>`);
-      a.push(`<button class="btn xl danger" onclick="station.finishing=true;renderHome()">Block finished</button>`)}
-    body=`<div class="act">${a.join('')}</div>${st!=='Inoculated'&&st!=='Incubating'&&db.settings.autoHarvest?'<p class="small muted">Or just set the mushrooms on the scale — it saves by itself once steady.</p>':''}`}
+    if(b.startWeight==null&&!s.hs.length&&can('harvest')&&ROLE!=='harvest')a.push(`<button class="btn xl" onclick="saveStart('${b.id}')">Save starting weight · <span class="wlive">${W()}</span></button>`);
+    if(inc){
+      if(can('grow'))a.push(`<button class="btn xl green" onclick="stageGo('${b.id}','Fruiting')">Move to fruiting</button>`);
+      if(can('grow','lab'))a.push(`<button class="btn xl danger" onclick="station.finishing=true;renderHome()">Contaminated / remove</button>`);
+      if(!a.length)body=note(`Still ${st.toLowerCase()} — day ${Math.floor((Date.now()-s.inocT)/DAY)}. Not ready to harvest yet.`);
+    }else{
+      if(can('harvest'))a.push(`<button class="btn xl green" onclick="recordHarvest()">Record harvest · <span class="wlive">${W()}</span></button>`);
+      if(st==='Between flushes'&&can('grow'))a.push(`<button class="btn xl ${can('harvest')?'alt':'green'}" onclick="stageGo('${b.id}','Fruiting')">Back to fruiting</button>`);
+      if(can('grow','harvest'))a.push(`<button class="btn xl danger" onclick="station.finishing=true;renderHome()">Block finished</button>`);
+      if(!a.length)body=note(`This block is ${st.toLowerCase()} — handled in the grow room.`);
+    }
+    if(a.length)body=`<div class="act">${a.join('')}</div>${!inc&&can('harvest')&&db.settings.autoHarvest?'<p class="small muted">Or just set the mushrooms on the scale — it saves by itself once steady.</p>':''}`}
+  const chips=[can('lab')?`<button class="chip" onclick="printBlocks(['${b.id}'],true)">Reprint label</button>`:'',st!=='Closed'&&can('grow')?`<button class="chip" onclick="askMove('${b.id}')">Move location</button>`:'',`<button class="chip" onclick="openBlock('${b.id}')">History</button>`].join('');
   return `<div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:flex-start"><div><div class="bigid">${esc(b.id)}</div><div class="muted">${esc(bt.species)} ${esc(bt.strain)}${bt.spawnBag?` · from spawn ${esc(bt.spawnBag)}`:''}</div></div><span class="pill ${st==='Closed'?'r':st==='Fruiting'?'g':''}">${st}</span></div>
    <div class="small muted" style="margin:6px 0 14px">${st!=='Closed'?`Flush ${b.flush} · `:''}${fmtW(s.tot)} harvested · day ${Math.floor((Date.now()-s.inocT)/DAY)} · ${esc(locStr(curLoc(b)))}</div>${body}
-   <div class="row" style="margin-top:16px;justify-content:space-between"><span class="chips"><button class="chip" onclick="printBlocks(['${b.id}'],true)">Reprint label</button>${st!=='Closed'?`<button class="chip" onclick="askMove('${b.id}')">Move location</button>`:''}<button class="chip" onclick="openBlock('${b.id}')">Full history</button></span>
+   <div class="row" style="margin-top:16px;justify-content:space-between"><span class="chips">${chips}</span>
    <button class="btn alt" onclick="station.block=null;station.decision=false;station.finishing=false;renderHome()">Done</button></div></div>`;
 }
 function weighCard(bt){
@@ -444,17 +471,28 @@ function weighCard(bt){
    <div class="row" style="justify-content:space-between;margin-top:16px">${tg?`<button class="chip" onclick="printRest('${bt.id}')">Skip weighing — print remaining labels</button>`:'<span></span>'}<button class="btn alt" onclick="station.batch=null;station.last=null;renderHome()">Done</button></div></div>`;
 }
 function idleCard(){
-  const today=liveHarvests().filter(h=>h.t>=today0());
-  return `<div class="card" style="text-align:center;padding:44px 16px"><div style="font-size:46px;line-height:1">🍄</div><div style="font-size:24px;font-weight:700;margin:10px 0 4px">Scan a block</div><p class="muted" style="margin:0 0 22px">Or a spawn bag. Whatever it needs next shows up here.</p>
-   <div class="row" style="justify-content:center;gap:10px"><button class="btn xl" style="max-width:240px" onclick="openNewBatch()">+ Add batch</button><button class="btn xl alt" style="max-width:240px" onclick="openNewSpawn()">+ Add spawn</button></div>
-   <p class="small muted" style="margin-top:14px">Tip: scan a spawn bag to start a new batch from it.</p>
-   ${today.length?`<p class="small muted" style="margin-top:18px">Harvested today: <b>${fmtW(sum(today.map(h=>h.grams)))}</b> from ${today.length} picks</p>`:''}</div>`;
+  const today=liveHarvests().filter(h=>h.t>=today0()),r=ROLES[ROLE];
+  const tot=today.length?`<p class="small muted" style="margin-top:18px">Harvested today: <b>${fmtW(sum(today.map(h=>h.grams)))}</b> from ${today.length} picks</p>`:'';
+  const adds=`<div class="row" style="justify-content:center;gap:10px"><button class="btn xl" style="max-width:240px" onclick="openNewBatch()">+ Add batch</button><button class="btn xl alt" style="max-width:240px" onclick="openNewSpawn()">+ Add spawn</button></div>`;
+  const head=(icon,t,sub)=>`<div style="font-size:46px;line-height:1">${icon}</div><div style="font-size:24px;font-weight:700;margin:10px 0 4px">${t}</div><p class="muted" style="margin:0 0 22px">${sub}</p>`;
+  let inner;
+  if(ROLE==='lab')inner=head('🧪','Scan a spawn bag','It starts a new batch and prints the block labels.')+adds;
+  else if(ROLE==='grow'){const inc=Object.values(db.blocks).filter(b=>b.stage==='Inoculated'||b.stage==='Incubating').length,fr=Object.values(db.blocks).filter(b=>b.stage==='Fruiting'||b.stage==='Between flushes').length;
+    inner=head('🌱','Scan a block',QUICK?'Incubating blocks go straight to fruiting when scanned.':'Move it to fruiting, mark contamination, or finish it.')+
+    `<label style="display:inline-flex;gap:8px;align-items:center;color:var(--ink);font-size:15px"><input type="checkbox" style="width:auto" ${QUICK?'checked':''} onchange="setQuick(this.checked)"> Quick mode — scanning an incubating block moves it to fruiting</label>
+    <p class="small muted" style="margin-top:16px">${inc} incubating · ${fr} fruiting or resting</p>`}
+  else if(ROLE==='harvest')inner=head('⚖️','Scan a block','Then set the mushrooms on the scale — it saves by itself.')+tot;
+  else inner=head('🍄','Scan a block','Or a spawn bag. Whatever it needs next shows up here.')+adds+'<p class="small muted" style="margin-top:14px">Tip: scan a spawn bag to start a new batch from it.</p>'+tot;
+  return `<div class="card" style="text-align:center;padding:44px 16px">${inner}</div>`;
 }
 function renderHome(){
   if(mode.type!=='stage'&&mode.type!=='loc')mode={type:station.block?'harvest':'lookup'};station.batch=null;
   if(station.block&&!db.blocks[station.block])station.block=null;if(station.batch&&!db.batches[station.batch])station.batch=null;
   const b=db.blocks[station.block],sb=!b&&db.spawnBags[station.spawn];
-  $('home').innerHTML=`<div class="home"><div>${scaleBox()}</div><div>${b?blockCard(b):sb?spawnCard(sb):idleCard()}</div></div>`;
+  if(!ROLE){$('home').innerHTML=`<div class="card" style="max-width:560px;margin:16px auto">${roleChooser(false)}</div>`;return}
+  const showScale=can('harvest')&&ROLE!=='lab';
+  $('home').innerHTML=showScale?`<div class="home"><div>${scaleBox()}</div><div>${b?blockCard(b):sb?spawnCard(sb):idleCard()}</div></div>`
+    :`<div style="max-width:720px;margin:0 auto">${b?blockCard(b):sb?spawnCard(sb):idleCard()}</div>`;
   updateWeight();
 }
 
@@ -624,7 +662,7 @@ function strainsCard(){
    <div class="row"><input id="str_sp" list="spl3" placeholder="Species (e.g. Lion's Mane)" style="width:170px"><input id="str_st" placeholder="Strain name (e.g. Golden Comb)" style="width:190px"><input id="str_gen" placeholder="Genetics / source" style="flex:1;min-width:160px"><input id="str_no" placeholder="Notes" style="width:150px"><button class="btn" onclick="addStrainRow()">Add strain</button></div>
    <datalist id="spl3">${speciesAll().map(s=>`<option>${esc(s)}`).join('')}</datalist></div>`;
 }
-function strainPick(v){const n=v==='__new';$('ns_newstrain').style.display=n?'':'none';if(n)setTimeout(()=>$('ns_sp').focus(),0)}
+function strainPick(v){const n=v==='__new';$('ns_newstrain').style.display=n?'':'none';if(n)setTimeout(()=>{const e=$('ns_sp');if(e)e.focus()},0)}
 
 function openNewSpawn(){
   const list=db.strains.slice().sort((a,c)=>strainName(a).localeCompare(strainName(c))),last=db.strains.find(x=>x.id===db.settings.lastStrain),pick=last?last.id:(list.length?'':'__new');
@@ -670,14 +708,15 @@ function spawnCard(sb){
   if(st==='Contaminated')body=`<div class="alert">Marked contaminated ${fmtDay(sb.stageHist[sb.stageHist.length-1].t)}.</div>`;
   else if(st==='Used'){const last=sb.batches[sb.batches.length-1];
     body=`<div class="alert ok">Used for batch${sb.batches.length>1?'es':''} ${sb.batches.map(x=>`<a href="#" onclick="openBatch('${x}');return false"><b>${esc(x)}</b></a>`).join(', ')}</div>
-    <div class="act">${last&&db.batches[last]?`<button class="btn xl alt" onclick="printBlocks(batchBlocks('${last}').map(b=>b.id),true)">Reprint batch ${esc(last)} labels</button>`:''}<button class="btn xl alt" onclick="quickBatch('${sb.id}')">Start another batch · ${quick}</button></div>`}
-  else body=`<div class="act"><button class="btn xl green" onclick="quickBatch('${sb.id}')">Start new batch · ${quick}</button>
+    ${can('lab')?`<div class="act">${last&&db.batches[last]?`<button class="btn xl alt" onclick="printBlocks(batchBlocks('${last}').map(b=>b.id),true)">Reprint batch ${esc(last)} labels</button>`:''}<button class="btn xl alt" onclick="quickBatch('${sb.id}')">Start another batch · ${quick}</button></div>`:''}`}
+  else if(!can('lab','grow'))body=`<div class="alert info">Spawn bag — ${st.toLowerCase()}. Handled in the lab.</div>`
+  else body=`<div class="act">${can('lab')?`<button class="btn xl green" onclick="quickBatch('${sb.id}')">Start new batch · ${quick}</button>`:''}
     ${st==='Colonizing'?`<button class="btn xl alt" onclick="spawnStage('${sb.id}','Ready')">Fully colonized — ready</button>`:''}
     <button class="btn xl danger" onclick="if(confirm('Mark ${sb.id} as contaminated?'))spawnStage('${sb.id}','Contaminated')">Contaminated</button></div>
-    <p class="small muted">Inoculation date is today. <a href="#" onclick="openNewBatch({spawnBag:'${sb.id}'});return false">Change count, weight or details</a></p>`;
+    ${can('lab')?`<p class="small muted">Inoculation date is today. <a href="#" onclick="openNewBatch({spawnBag:'${sb.id}'});return false">Change count, weight or details</a></p>`:''}`;
   return `<div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:flex-start"><div><div class="bigid">${esc(sb.id)}</div><div class="muted">Spawn · ${esc(l.species||'')} ${esc(l.strain||'')}${l.genetics?` <span class="tag">${esc(l.genetics)}</span>`:''}</div></div><span class="pill ${st==='Contaminated'?'r':st==='Ready'?'g':''}">${st}</span></div>
    <div class="small muted" style="margin:6px 0 14px">Lot ${esc(sb.lotId)} · made ${fmtDay(sb.stageHist[0].t)} · day ${age}${l.bagWeight?' · '+fmtW(l.bagWeight):''}${l.cultureId?' · culture '+esc(l.cultureId):''}</div>${body}
-   <div class="row" style="margin-top:16px;justify-content:space-between"><span class="chips"><button class="chip" onclick="printSpawn(['${sb.id}'])">Reprint label</button></span>
+   <div class="row" style="margin-top:16px;justify-content:space-between"><span class="chips">${can('lab')?`<button class="chip" onclick="printSpawn(['${sb.id}'])">Reprint label</button>`:''}</span>
    <button class="btn alt" onclick="station.spawn=null;renderHome()">Done</button></div></div>`;
 }
 function setBatchWeight(id){const bt=db.batches[id],v=prompt(`Weight per block (${U()}) — applies to every block in batch ${id} that hasn't been weighed individually`,bt.blockWeight!=null?wOut(bt.blockWeight):'');if(v===null)return;
