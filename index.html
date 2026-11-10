@@ -77,7 +77,7 @@ dialog::backdrop{background:#0006}
 <header>
   <h1 style="cursor:pointer" onclick="station.block=null;show('home')">🍄 Fungatory</h1><button id="roleChip" class="chip" onclick="chooseRole()" style="display:none"></button><button id="printerChip" class="chip" onclick="printerSetup()" style="display:none"></button><span id="syncStat" class="small muted" style="cursor:pointer;white-space:nowrap" onclick="syncClick()"></span>
   <nav id="nav">
-    <button data-t="home" class="on">Home</button><button id="moreBtn" onclick="toggleMore()">More ▾<span id="taskBadge"></span></button><span id="moreNav"><button data-t="dash">Dashboard</button><button data-t="blocks">Blocks</button><button data-t="batches">Batches</button><button data-t="inventory">Inventory</button><button data-t="planning">Planning</button><button data-t="tasks">Tasks</button><button data-t="labels">Labels</button><button data-t="settings">Settings</button></span>
+    <button data-t="home" class="on">Home</button><button id="moreBtn" onclick="toggleMore()">More ▾<span id="taskBadge"></span></button><span id="moreNav"><button data-t="dash">Dashboard</button><button data-t="blocks">Blocks</button><button data-t="batches">Batches</button><button data-t="inventory">Inventory</button><button data-t="planning">Planning</button><button data-t="tasks">Tasks</button><button data-t="prep">Prep</button><button data-t="labels">Labels</button><button data-t="settings">Settings</button></span>
   </nav>
   <button id="opChip" class="chip" onclick="whoDialog()" title="Who is using this device"></button><button class="chip" onclick="activityDialog()">📋 Activity</button>
   <input id="scanbox" placeholder="Scan or type a block ID…" autocomplete="off">
@@ -93,6 +93,7 @@ dialog::backdrop{background:#0006}
 <section id="planning"></section>
 <section id="tasks"></section>
 <section id="labels"></section>
+<section id="prep"></section>
 <section id="settings"></section>
 </main>
 <dialog id="dlg"></dialog>
@@ -124,7 +125,7 @@ const pct=x=>x==null||isNaN(x)?'—':Math.round(x)+'%';
 const sum=a=>a.reduce((x,y)=>x+y,0);
 
 function blank(){return {v:2,settings:{unit:'lb',labelW:50,labelH:30,operators:['Trace'],op:'Trace',rooms:['Lab','Incubation','Fruiting'],nextBatch:1,bagIncluded:true,bagWeight:0,autoStart:true,autoHarvest:true,autoPrint:true,captureMin:200,rearm:30,stableTol:5,stableMs:1000,buffer:10,capInoc:100,horizon:12,useMeasured:true},
-  strains:[],cultures:[],cultureJars:{},spawn:[],spawnBags:{},recipes:[],batches:{},blocks:{},harvests:[],targets:{},lead:{},orders:[],tasks:[],snapshots:{},sensorReadings:[],log:[]}}
+  strains:[],cultures:[],cultureJars:{},cycles:[],spawn:[],spawnBags:{},recipes:[],batches:{},blocks:{},harvests:[],targets:{},lead:{},orders:[],tasks:[],snapshots:{},sensorReadings:[],log:[]}}
 let db=load();db.log.forEach((l,i)=>{if(!l.id)l.id='l'+hashStr(l.t+'|'+l.msg+'|'+i)});
 function load(){
   try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.blocks){const b=blank();const out=Object.assign(b,d);out.settings=Object.assign(blank().settings,d.settings||{});return out}}catch(e){}
@@ -153,7 +154,7 @@ function save(){try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){toast(
    server last had, pushes only records it changed, and pulls other devices' changes every few seconds.
    Works offline: unsent changes stay in this browser and go up when the server is reachable again. */
 const SYNC={on:false,ver:0,shadow:{},busy:false,again:false,t:null,key:'',state:'',first:false,dirty:false};
-const S_MAPS=['batches','blocks','spawnBags','cultureJars','targets','lead','snapshots'],S_LISTS=['harvests','tasks','orders','spawn','cultures','strains','recipes','log'];
+const S_MAPS=['batches','blocks','spawnBags','cultureJars','targets','lead','snapshots'],S_LISTS=['harvests','tasks','orders','spawn','cultures','strains','recipes','log','cycles'];
 function flatten(d){const r={};S_MAPS.forEach(c=>Object.entries(d[c]||{}).forEach(([k,v])=>{r[c+'/'+k]=v}));
   S_LISTS.forEach(c=>(d[c]||[]).forEach(v=>{if(v&&v.id!=null)r[c+'/'+v.id]=v}));
   const st=Object.assign({},d.settings);delete st.op;r['_/settings']=st;r['_/sensorReadings']=d.sensorReadings||[];return r}
@@ -251,6 +252,7 @@ function lead(S){return Object.assign({},LEAD_DEFAULT,db.lead[S]||{})}
 
 /* ================= navigation ================= */
 const ROLES={
+  prep:{icon:'🔥',name:'Spawn & Substrate Prep',desc:'Log sterilization and pasteurization runs, watch the Inkbird temperature graph.'},
   lab:{icon:'🧪',name:'Lab',desc:'Make spawn, start batches from spawn bags, print labels.'},
   grow:{icon:'🌱',name:'Incubation / Fruiting',desc:'Move blocks into fruiting, mark contamination, finish blocks.'},
   harvest:{icon:'⚖️',name:'Harvesting',desc:'Scan a block, set mushrooms on the scale. Nothing else.'},
@@ -269,7 +271,7 @@ function toggleMore(){moreOpen=!moreOpen;$('moreNav').classList.toggle('open',mo
 $('nav').onclick=e=>{const b=e.target.closest('button');if(b&&b.dataset.t)show(b.dataset.t)};
 function show(t){tab=t;if((t!=='home')!==moreOpen)toggleMore();
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===t));render()}
-function render(){MS={};genTasks();renderHeader();renderMode();({home:renderHome,dash:renderDash,blocks:renderBlocks,batches:renderBatches,inventory:renderInventory,planning:renderPlanning,tasks:renderTasks,labels:renderLabels,settings:renderSettings})[tab]()}
+function render(){MS={};genTasks();renderHeader();renderMode();({prep:renderPrep,home:renderHome,dash:renderDash,blocks:renderBlocks,batches:renderBatches,inventory:renderInventory,planning:renderPlanning,tasks:renderTasks,labels:renderLabels,settings:renderSettings})[tab]()}
 function renderHeader(){
   const r=ROLES[ROLE],full=!ROLE||ROLE==='all';$('roleChip').style.display=ROLE?'':'none';$('roleChip').innerHTML=r?`${r.icon} ${r.name} ▾`:'';
   $('addBtns').style.display=full||ROLE==='lab'?'contents':'none';$('moreBtn').style.display=full?'':'none';
@@ -514,6 +516,7 @@ function renderHome(){
   if(station.block&&!db.blocks[station.block])station.block=null;if(station.batch&&!db.batches[station.batch])station.batch=null;
   const b=db.blocks[station.block],sb=!b&&db.spawnBags[station.spawn],cj=!b&&!sb&&db.cultureJars[station.culture];
   if(!ROLE){$('home').innerHTML=`<div class="card" style="max-width:560px;margin:16px auto">${roleChooser(false)}</div>`;return}
+  if(ROLE==='prep'&&!station.block&&!station.spawn&&!station.culture){$('home').innerHTML=prepView();drawPrepChart();return}
   const showScale=can('harvest')&&ROLE!=='lab';
   $('home').innerHTML=showScale?`<div class="home"><div>${scaleBox()}</div><div>${b?blockCard(b):sb?spawnCard(sb):cj?cultureCard(cj):idleCard()}</div></div>`
     :`<div style="max-width:720px;margin:0 auto">${b?blockCard(b):sb?spawnCard(sb):cj?cultureCard(cj):idleCard()}</div>`;
@@ -624,7 +627,8 @@ function openNewBatch(pf){
   <label>Spawn used (kg)<input id="nb_su" type="number" step="any"></label><label>Inoculation rate (%)<input id="nb_ir" type="number" step="any"></label>
   <label>Preparation date<input id="nb_pd" type="date" value="${dstr(Date.now())}"></label><label>Sterilization date<input id="nb_sd" type="date" value="${dstr(Date.now())}"></label>
   <label>Responsible operator<select id="nb_op">${db.settings.operators.map(o=>`<option ${o===op()?'selected':''}>${esc(o)}</option>`).join('')}</select></label>
-  <label>Dry substrate per block (g)<input id="nb_dw" type="number" step="any"></label></div>
+  <label>Dry substrate per block (g)<input id="nb_dw" type="number" step="any"></label>
+  <label>Sterilized / pasteurized in<select id="nb_cy">${cycleOptions('substrate')}</select></label></div>
   <label>Ingredient quantities<textarea id="nb_ing"></textarea></label><label>Notes<textarea id="nb_no"></textarea></label></details>
   <div class="act"><button class="btn xl green" onclick="createBatch()">Create batch &amp; print labels</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`);
   $('nb_rc').onchange=e=>{const r=db.recipes.find(x=>x.id===e.target.value);if(r&&!$('nb_ing').value)$('nb_ing').value=r.ingredients||''};
@@ -638,7 +642,7 @@ function makeBatch(o){
   if(sl&&o.spawnUsed&&!sb)sl.remaining=Math.max(0,(sl.remaining??sl.qty)-o.spawnUsed);
   const bt=db.batches[id]={id,species:o.species,strain:o.strain||'',recipe:o.rc?o.rc.name:'',recipeVer:o.rc?o.rc.version:'',recipeId:o.rc?o.rc.id:'',ingredients:o.ingredients||'',
     spawnLot:sl?sl.id:'',spawnBag:sb?sb.id:'',spawnUsed:o.spawnUsed||(sb&&sl&&sl.bagWeight?sl.bagWeight/1000:null),cultureLot:sl?sl.cultureId:'',
-    inocRate:o.inocRate||'',prepDate:o.prepDate||now,sterilDate:o.sterilDate||now,inocDate:o.inocDate||now,count:o.count,blockWeight:o.blockWeight??null,
+    inocRate:o.inocRate||'',prepDate:o.prepDate||now,sterilDate:o.sterilDate||now,inocDate:o.inocDate||now,cycleId:o.cycleId||'',count:o.count,blockWeight:o.blockWeight??null,
     operator:o.operator||op(),dryWeight:o.dryWeight||null,notes:o.notes||'',created:Date.now(),prePrinted:true};
   if(/^\d+$/.test(id))db.settings.nextBatch=Math.max(+db.settings.nextBatch||1,+id+1);
   if(bt.blockWeight!=null)db.settings.lastBlockW=bt.blockWeight;
@@ -650,7 +654,7 @@ function makeBatch(o){
 function createBatch(){
   const bwIn=+$('nb_bw').value,rc=db.recipes.find(x=>x.id===$('nb_rc').value);
   const bt=makeBatch({id:$('nb_id').value,species:$('nb_sp').value.trim(),strain:$('nb_st').value.trim(),count:Math.max(1,+$('nb_n').value||1),blockWeight:bwIn>0?Math.round(wIn(bwIn)*10)/10:null,
-    rc,spawnLot:$('nb_sl').value,spawnBag:$('nb_sbag').value,spawnUsed:+$('nb_su').value||0,inocRate:$('nb_ir').value,prepDate:$('nb_pd').value,sterilDate:$('nb_sd').value,inocDate:$('nb_id2').value,
+    cycleId:($('nb_cy')||{}).value||'',rc,spawnLot:$('nb_sl').value,spawnBag:$('nb_sbag').value,spawnUsed:+$('nb_su').value||0,inocRate:$('nb_ir').value,prepDate:$('nb_pd').value,sterilDate:$('nb_sd').value,inocDate:$('nb_id2').value,
     operator:$('nb_op').value,dryWeight:+$('nb_dw').value||null,ingredients:$('nb_ing').value,notes:$('nb_no').value});
   if(!bt)return;closeDlg();station.block=null;show('home');printBlocks(batchBlocks(bt.id).map(b=>b.id));
 }
@@ -711,6 +715,7 @@ function openNewSpawn(pf){
   <details style="margin:8px 0"><summary class="muted" style="cursor:pointer">More details (optional)</summary><div class="two">
   <label>Spawn lot ID<input id="ns_id" value="S${db.settings.nextSpawn||1}"></label><label>Grain<input id="ns_g" placeholder="e.g. rye, millet"></label>
   <label>Generation<select id="ns_gen2"><option value="">—</option><option value="Master" ${jar?'selected':''}>Master (from culture)</option><option value="G2">G2 (from spawn)</option></select></label>
+  <label>Grain sterilized in<select id="ns_cy">${cycleOptions('spawn')}</select></label>
   <label>From culture lot<select id="ns_c"><option value="">—</option>${db.cultures.map(c=>`<option value="${esc(c.id)}" ${cl&&cl.id===c.id?'selected':''}>${esc(c.id)} — ${esc(c.species)} ${esc(c.strain)}</option>`).join('')}</select></label></div>
   <label>Notes<textarea id="ns_no"></textarea></label></details>
   <div class="act"><button class="btn xl green" onclick="createSpawn()">Create spawn &amp; print labels</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`);
@@ -721,7 +726,7 @@ function makeSpawn(o){
   if(!id){toast('Spawn lot ID required');return null}if(db.spawn.some(y=>y.id===id)){toast('Spawn lot '+id+' already exists');return null}
   const jar=o.cultureJar&&db.cultureJars[o.cultureJar],cl=jar?db.cultures.find(c=>c.id===jar.lotId):db.cultures.find(c=>c.id===o.cultureId),kg=w?Math.round(n*w)/1000:0;
   const lot={id,cultureId:cl?cl.id:'',cultureJar:jar?jar.id:'',gen:o.gen||(jar?'Master':''),species:x.species,strain:x.strain||'',strainId:x.id,genetics:x.genetics||(cl&&cl.source)||'',
-    date:o.date||dstr(Date.now()),qty:kg,remaining:kg,bagWeight:w,grain:o.grain||'',notes:o.notes||'',bags:n,created:Date.now()};
+    date:o.date||dstr(Date.now()),cycleId:o.cycleId||'',qty:kg,remaining:kg,bagWeight:w,grain:o.grain||'',notes:o.notes||'',bags:n,created:Date.now()};
   db.spawn.push(lot);const t=pdate(lot.date)||Date.now(),ids=[];
   for(let i=1;i<=n;i++){const bid=`${id}-${String(i).padStart(n>99?3:2,'0')}`;if(db.spawnBags[bid]||db.blocks[bid]||db.cultureJars[bid])continue;
     db.spawnBags[bid]={id:bid,lotId:id,stage:'Colonizing',stageHist:[{stage:'Colonizing',t,op:op()}],created:Date.now(),batches:[],labelPrints:0,notes:''};ids.push(bid)}
@@ -735,13 +740,13 @@ function makeSpawn(o){
 function createSpawn(){
   const x=readStrain('ns');if(!x)return;const wv=+$('ns_w').value;
   const r=makeSpawn({strain:x,id:$('ns_id').value,n:$('ns_n').value,w:wv>0?Math.round(wIn(wv)*10)/10:null,date:$('ns_d').value,grain:$('ns_g').value,notes:$('ns_no').value,
-    gen:$('ns_gen2').value,cultureJar:$('ns_cjar').value,cultureId:$('ns_c').value});
+    gen:$('ns_gen2').value,cycleId:($('ns_cy')||{}).value||'',cultureJar:$('ns_cjar').value,cultureId:$('ns_c').value});
   if(!r)return;closeDlg();station.block=null;if(!$('ns_cjar')||!r.lot.cultureJar)station.spawn=null;show('home');printSpawn(r.ids);
 }
 function quickSpawn(jarId){
   const jar=db.cultureJars[jarId],cl=db.cultures.find(c=>c.id===jar.lotId)||{},x=strainOf(cl),d=spawnDefault(x&&x.id);
   if(!x||d.w==null)return openNewSpawn({cultureJar:jarId});
-  const r=makeSpawn({strain:x,n:d.n,w:d.w,cultureJar:jarId});if(!r)return;renderHome();printSpawn(r.ids);
+  const r=makeSpawn({strain:x,n:d.n,w:d.w,cultureJar:jarId,cycleId:defaultCycle('spawn')});if(!r)return;renderHome();printSpawn(r.ids);
 }
 
 /* ---------- liquid cultures ---------- */
@@ -810,7 +815,7 @@ function culturesCard(){
 function quickBatch(bagId){
   const sb=db.spawnBags[bagId],l=db.spawn.find(x=>x.id===sb.lotId)||{},d=batchDefault(l.species);
   if(!l.species||d.w==null)return openNewBatch({spawnBag:bagId});
-  const bt=makeBatch({species:l.species,strain:l.strain,count:d.n,blockWeight:d.w,spawnLot:l.id,spawnBag:bagId});
+  const bt=makeBatch({species:l.species,strain:l.strain,count:d.n,blockWeight:d.w,spawnLot:l.id,spawnBag:bagId,cycleId:defaultCycle('substrate')});
   if(!bt)return;renderHome();printBlocks(batchBlocks(bt.id).map(b=>b.id));
 }
 function askDelSpawn(id){const b=db.spawnBags[id],n=Object.values(db.spawnBags).filter(x=>x.lotId===b.lotId).length;
@@ -851,7 +856,7 @@ function openBatch(id){
   const bt=db.batches[id];if(!bt)return;const bl=batchBlocks(id),st=bl.map(blockStats),cul=db.cultures.find(c=>c.id===bt.cultureLot),sl=db.spawn.find(s=>s.id===bt.spawnLot);
   dlg(`<div class="row" style="margin:0;justify-content:space-between"><div class="bigid">Batch ${esc(id)}</div><span class="tag ${batchStatus(bt)==='active'?'m':''}">${batchStatus(bt)}</span></div>
   <p class="muted">${esc(bt.species)} ${esc(bt.strain)} · ${bl.length}/${bt.count} blocks · operator ${esc(bt.operator)}</p>
-  <div class="alert info small"><b>Traceability:</b> Culture ${esc(bt.cultureLot||'—')}${cul?` (${esc(cul.species)} ${esc(cul.strain)}, ${fmtDay(pdate(cul.date))})`:''} ${sl&&sl.cultureJar?`→ Culture jar ${esc(sl.cultureJar)} `:''}→ ${sl&&sl.gen==='Master'?'Master spawn':'Spawn'} ${esc(bt.spawnLot||'—')}${sl?` (made ${fmtDay(pdate(sl.date))})`:''}${bt.spawnBag?` → Spawn bag ${esc(bt.spawnBag)}`:''} → Batch ${esc(id)} → ${bl.length} blocks</div>
+  <div class="alert info small"><b>Traceability:</b> Culture ${esc(bt.cultureLot||'—')}${cul?` (${esc(cul.species)} ${esc(cul.strain)}, ${fmtDay(pdate(cul.date))})`:''} ${sl&&sl.cultureJar?`→ Culture jar ${esc(sl.cultureJar)} `:''}→ ${sl&&sl.gen==='Master'?'Master spawn':'Spawn'} ${esc(bt.spawnLot||'—')}${sl?` (made ${fmtDay(pdate(sl.date))})`:''}${bt.spawnBag?` → Spawn bag ${esc(bt.spawnBag)}`:''} → Batch ${esc(id)} → ${bl.length} blocks${cycleRef(bt.cycleId,'Substrate')}${cycleRef(sl&&sl.cycleId,'Spawn grain')}</div>
   <div class="two small"><div>Recipe: <b>${esc(bt.recipe||'—')}${bt.recipeVer?' v'+esc(bt.recipeVer):''}</b></div><div>Inoculation rate: <b>${esc(bt.inocRate||'—')}${bt.inocRate?'%':''}</b>${bt.spawnUsed?` · ${r1(bt.spawnUsed)} kg spawn`:''}</div>
   <div>Prepared ${fmtDay(pdate(bt.prepDate))} · Sterilized ${fmtDay(pdate(bt.sterilDate))}</div><div>Inoculated <b>${fmtDay(pdate(bt.inocDate))}</b> · Dry substrate ${bt.dryWeight?bt.dryWeight+' g':'—'}</div></div>
   ${bt.ingredients?`<p class="small"><b>Ingredients:</b> ${esc(bt.ingredients)}</p>`:''}
@@ -1047,6 +1052,154 @@ function taskSet(id,k,v){const t=db.tasks.find(x=>x.id===id);t[k]=v;if(k==='stat
 function postpone(id,d){const t=db.tasks.find(x=>x.id===id);t.due+=d*DAY;t.resched=true;t.hist.push({t:Date.now(),msg:`Postponed to ${fmtDay(t.due)} by ${op()}`});save();render()}
 function resched(id,v){const t=db.tasks.find(x=>x.id===id),d=pdate(v);if(!d)return;t.due=d;t.resched=true;t.hist.push({t:Date.now(),msg:`Rescheduled to ${fmtDay(d)} by ${op()}`});save();render()}
 function addTask(){const t=$('tk_t').value.trim();if(!t)return;db.tasks.push({id:uid(),key:'manual|'+uid(),auto:false,title:t,due:pdate($('tk_d').value)||today0(),qty:$('tk_q').value,pri:$('tk_p').value,assignee:'',status:'open',created:Date.now(),hist:[]});save();render()}
+
+/* ================= spawn & substrate prep (sterilize / pasteurize) ================= */
+const CYCLE_TYPES={Pasteurize:{methods:['Steam','Hot water bath','Barrel / drum','Oven'],target:60,hold:120},Sterilize:{methods:['Pressure cooker','Autoclave','Atmospheric steam'],target:121,hold:150}};
+const tU=()=>db.settings.tempUnit||(db.settings.unit==='lb'?'F':'C');
+const cToD=c=>c==null||isNaN(c)?null:tU()==='F'?c*9/5+32:c,dToC=v=>tU()==='F'?(v-32)*5/9:v;
+const fT=c=>c==null||isNaN(c)?'—':Math.round(cToD(c))+'°'+tU();
+const fDur=m=>m==null?'—':m>=60?`${Math.floor(m/60)}h ${Math.round(m%60)}m`:`${Math.round(m)}m`;
+let PREP={sel:null};
+function cycleTag(c){return `#${c.num} ${c.type}`}
+function cycleStats(c){
+  const r=(c.readings||[]).slice().sort((a,b)=>a[0]-b[0]),T=+c.target;let best=0,cur=0,total=0,max=null,min=null;
+  const gaps=r.slice(1).map((x,i)=>(x[0]-r[i][0])/6e4).sort((a,b)=>a-b),allow=Math.max(15,(gaps[Math.floor(gaps.length/2)]||0)*2.5);
+  for(let i=0;i<r.length;i++){const v=r[i][1];if(v!=null){max=max==null?v:Math.max(max,v);min=min==null?v:Math.min(min,v)}
+    if(i>0){const gap=(r[i][0]-r[i-1][0])/6e4;if(r[i][1]>=T&&r[i-1][1]>=T&&gap<=allow){cur+=gap;total+=gap;best=Math.max(best,cur)}else cur=0}}
+  const last=r[r.length-1];return {held:best,total,max,min,last:last?last[1]:null,lastT:last?last[0]:null,n:r.length,ok:best>=+c.hold}
+}
+function cycleOptions(kind){
+  const list=db.cycles.slice().sort((a,b)=>b.start-a.start).slice(0,20),def=defaultCycle(kind);
+  return `<option value="">—</option>`+list.map(c=>`<option value="${c.id}" ${c.id===def?'selected':''}>${esc(cycleTag(c))} · ${fmtDay(c.start)} · ${c.status}</option>`).join('')}
+function defaultCycle(kind){const k=kind==='spawn'?'spawn':'blocks',c=db.cycles.slice().sort((a,b)=>b.start-a.start).find(c=>(+c[k]||0)>0&&Date.now()-c.start<4*DAY&&c.status!=='Failed');return c?c.id:''}
+function cycleRef(id,label){const c=id&&db.cycles.find(x=>x.id===id);return c?`<br>${label}: <a href="#" onclick="closeDlg();PREP.sel='${c.id}';show(ROLE==='prep'?'home':'prep');return false">${esc(cycleTag(c))}</a> on ${fmtDay(c.start)} — <b class="${c.status==='Failed'?'bad':c.status==='Passed'?'good':''}">${c.status}</b>`:''}
+function openNewCycle(type){
+  type=type||db.settings.lastCycleType||'Pasteurize';const T=CYCLE_TYPES[type],d=(db.settings.prepDefaults||{})[type]||{};
+  dlg(`<h3 style="margin-top:0">Start a ${type.toLowerCase()} run</h3>
+  <div class="chips">${Object.keys(CYCLE_TYPES).map(k=>`<button class="chip ${k===type?'on':''}" onclick="openNewCycle('${k}')">${k==='Pasteurize'?'♨️':'🧪'} ${k}</button>`).join('')}</div>
+  <label>Method<select id="cy_m">${T.methods.map(m=>`<option ${m===(d.method||T.methods[0])?'selected':''}>${m}</option>`).join('')}</select></label>
+  <div class="two"><label>Fruiting blocks going in<input id="cy_b" type="number" min="0" value="${d.blocks??(type==='Pasteurize'?20:0)}"></label><label>Spawn bags going in<input id="cy_s" type="number" min="0" value="${d.spawn??(type==='Sterilize'?10:0)}"></label>
+  <label>Target temperature (°${tU()})<input id="cy_t" type="number" step="any" value="${Math.round(cToD(d.target??T.target))}"></label><label>Hold for (minutes)<input id="cy_h" type="number" min="1" value="${d.hold??T.hold}"></label></div>
+  <label>Substrate / grain<input id="cy_sub" placeholder="e.g. Masters mix, rye" value="${esc(d.sub||'')}"></label>
+  <label>Notes<input id="cy_no" placeholder="optional"></label>
+  <div class="act"><button class="btn xl green" onclick="createCycle('${type}')">Start run</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`);
+}
+function createCycle(type){
+  const b=+$('cy_b').value||0,sp=+$('cy_s').value||0;if(!b&&!sp)return toast('Enter how many blocks or spawn bags');
+  const num=+db.settings.nextCycle||1,target=Math.round(dToC(+$('cy_t').value)*10)/10,hold=+$('cy_h').value||60,method=$('cy_m').value,sub=$('cy_sub').value.trim();
+  const c={id:uid(),num,type,method,blocks:b,spawn:sp,sub,target,hold,start:Date.now(),end:null,status:'Running',readings:[],op:op(),notes:$('cy_no').value,created:Date.now()};
+  db.cycles.push(c);db.settings.nextCycle=num+1;db.settings.lastCycleType=type;db.settings.prepDefaults=db.settings.prepDefaults||{};db.settings.prepDefaults[type]={method,blocks:b,spawn:sp,target,hold,sub};
+  audit(`Started ${type.toLowerCase()} run #${num} (${[b&&b+' blocks',sp&&sp+' spawn bags'].filter(Boolean).join(', ')}, ${method})`);save();closeDlg();PREP.sel=c.id;
+  if(INK.dev&&INK.dev.gatt.connected)INK.cycleId=c.id;prepRefresh(true);
+}
+function addReading(id){const c=db.cycles.find(x=>x.id===id),v=prompt(`Temperature now (°${tU()})`);if(v==null||v.trim()===''||isNaN(+v))return;
+  c.readings.push([Date.now(),Math.round(dToC(+v)*10)/10,'manual']);save();prepRefresh(true)}
+function finishCycle(id,status){const c=db.cycles.find(x=>x.id===id),st=cycleStats(c);
+  status=status||(st.n?(st.ok?'Passed':'Failed'):'Done');
+  if(!c.end)c.end=Date.now();c.status=status;if(INK.cycleId===id)INK.cycleId=null;
+  audit(`Finished ${c.type.toLowerCase()} run #${c.num}: ${status}${st.n?` (held ≥${fT(c.target)} for ${fDur(st.held)} of ${fDur(c.hold)})`:''}`);save();toast(`Run #${c.num}: ${status}`);prepRefresh(true)}
+function delCycle(id){const c=db.cycles.find(x=>x.id===id);if(!c||!confirm(`Delete run #${c.num}? Batches linked to it keep their records.`))return;db.cycles=db.cycles.filter(x=>x.id!==id);if(PREP.sel===id)PREP.sel=null;audit(`Deleted run #${c.num}`);save();prepRefresh(true)}
+function prepRefresh(force){const a=document.activeElement;if(!force&&($('dlg').open||(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&a.id!=='scanbox')))return;
+  if(tab==='prep')renderPrep();else if(tab==='home'&&ROLE==='prep'&&!station.block&&!station.spawn&&!station.culture)renderHome()}
+function renderPrep(){$('prep').innerHTML=prepView();drawPrepChart()}
+function cycleCard(c){
+  const st=cycleStats(c),run=c.status==='Running',pctv=Math.min(100,st.held/(+c.hold||1)*100),live=INK.cycleId===c.id&&INK.dev&&INK.dev.gatt.connected;
+  const dur=fDur(((c.end||Date.now())-c.start)/6e4);
+  return `<div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:flex-start"><div><div class="bigid">${c.type==='Pasteurize'?'♨️':'🧪'} Run #${c.num}</div>
+    <div class="muted">${c.type} · ${esc(c.method)} · ${[c.blocks&&c.blocks+' fruiting blocks',c.spawn&&c.spawn+' spawn bags'].filter(Boolean).join(' + ')}${c.sub?' · '+esc(c.sub):''}</div></div>
+    <span class="pill ${c.status==='Passed'?'g':c.status==='Failed'?'r':run?'a':''}">${c.status}</span></div>
+   <div class="small muted" style="margin:6px 0 10px">Started ${fmtDate(c.start)} by ${esc(c.op)} · ${run?'running '+dur:'took '+dur} · target ${fT(c.target)} for ${fDur(c.hold)}</div>
+   <div class="grid"><div class="stat"><b id="liveTemp">${live&&INK.temp!=null?fT(INK.temp):fT(st.last)}</b><span>${live?'live from Inkbird':st.lastT?'last reading '+fmtDate(st.lastT):'no readings yet'}</span></div>
+    <div class="stat"><b class="${st.ok?'good':''}">${fDur(st.held)}</b><span>held at or above ${fT(c.target)} (need ${fDur(c.hold)})</span></div>
+    <div class="stat"><b>${fT(st.max)}</b><span>highest</span></div><div class="stat"><b>${st.n}</b><span>readings</span></div></div>
+   <div style="height:10px;background:var(--chip);border-radius:6px;margin:10px 0;overflow:hidden"><div style="height:100%;width:${pctv}%;background:${st.ok?'var(--acc2)':'var(--acc)'}"></div></div>
+   ${st.ok&&run?`<div class="alert ok">✓ Held long enough — this run can be finished as <b>Passed</b>.</div>`:''}
+   <div id="prepChart" data-id="${c.id}" style="width:100%"></div>
+   <div class="row">${run?`<button class="btn ${live?'alt':''}" onclick="inkConnect('${c.id}')">${live?'🌡 Inkbird connected':'🌡 Connect Inkbird'}</button><button class="btn alt" onclick="addReading('${c.id}')">+ Add reading</button>`:''}
+    <label class="btn alt" style="margin:0;color:var(--ink)">Import Inkbird CSV<input type="file" accept=".csv,.txt,text/csv" style="display:none" onchange="importInkCSV('${c.id}',this.files[0])"></label>
+    ${run?`<button class="btn green" onclick="finishCycle('${c.id}')">Finish run</button>`:`<button class="chip" onclick="finishCycle('${c.id}','Passed')">Mark passed</button><button class="chip" onclick="finishCycle('${c.id}','Failed')">Mark failed</button>`}
+    <button class="chip" onclick="delCycle('${c.id}')">Delete</button></div>
+   ${live&&INK.temps&&INK.temps.filter(x=>x!=null).length>1?`<div class="row small"><span class="muted">Recording probe</span>${INK.temps.map((t,i)=>t==null?'':`<button class="chip ${INK.probe===i?'on':''}" onclick="INK.probe=${i};prepRefresh(true)">P${i+1}: ${fT(t)}</button>`).join('')}</div>`:''}
+   ${run&&!live?'<p class="small muted">Keep this page open while it runs if the Inkbird is connected — readings are saved every 30 seconds. You can also import the Inkbird app\'s CSV export afterwards.</p>':''}</div>`;
+}
+function prepView(){
+  const sorted=db.cycles.slice().sort((a,b)=>b.start-a.start),running=sorted.filter(c=>c.status==='Running');
+  let cur=db.cycles.find(c=>c.id===PREP.sel)||running[0];if(cur)PREP.sel=cur.id;
+  const wk=sorted.filter(c=>c.start>=weekStart(Date.now()));
+  return `<div class="row" style="justify-content:space-between"><div class="row" style="margin:0"><button class="btn xl green" style="width:auto" onclick="openNewCycle()">+ Start a run</button>
+     ${running.length>1?running.map(c=>`<button class="chip ${c===cur?'on':''}" onclick="PREP.sel='${c.id}';prepRefresh(true)">Run #${c.num} running</button>`).join(''):''}</div>
+     <span class="small muted">This week: <b>${sum(wk.map(c=>+c.blocks||0))}</b> blocks · <b>${sum(wk.map(c=>+c.spawn||0))}</b> spawn bags · <button class="chip" onclick="db.settings.tempUnit=tU()==='F'?'C':'F';save();prepRefresh(true)">°${tU()}</button></span></div>
+   ${cur?cycleCard(cur):`<div class="card" style="text-align:center;padding:40px 16px"><div style="font-size:46px">🔥</div><div style="font-size:22px;font-weight:700;margin:8px 0">No run in progress</div><p class="muted">Start a run when blocks or spawn go into the pasteurizer or pressure cooker.</p></div>`}
+   <div class="card"><b>Recent runs</b><div class="scroll"><table><tr><th>Run</th><th>Date</th><th>Contents</th><th class="n">Held</th><th>Result</th><th>By</th></tr>
+   ${sorted.slice(0,25).map(c=>{const st=cycleStats(c);return `<tr class="click" onclick="PREP.sel='${c.id}';prepRefresh(true);scrollTo(0,0)"><td><b>${esc(cycleTag(c))}</b><div class="small muted">${esc(c.method)}</div></td><td>${fmtDay(c.start)}</td><td>${[c.blocks&&c.blocks+' blocks',c.spawn&&c.spawn+' spawn'].filter(Boolean).join(', ')}</td><td class="n">${st.n?fDur(st.held)+' / '+fDur(c.hold):'—'}</td><td><span class="tag ${c.status==='Passed'?'m':''}" style="${c.status==='Failed'?'background:var(--warn);color:#fff':''}">${c.status}</span></td><td>${esc(c.op)}</td></tr>`}).join('')||'<tr><td colspan="6" class="muted">No runs yet.</td></tr>'}</table></div></div>`;
+}
+function drawPrepChart(){
+  const el=$('prepChart');if(!el)return;const c=db.cycles.find(x=>x.id===el.dataset.id);if(!c)return;
+  const r=(c.readings||[]).filter(x=>x[1]!=null).slice().sort((a,b)=>a[0]-b[0]);
+  if(r.length<2){el.innerHTML=`<div class="small muted" style="padding:20px 0;text-align:center">The temperature graph appears after two readings.</div>`;return}
+  const W=640,H=230,L=46,R=12,T=12,B=28,t0=r[0][0],t1=Math.max(r[r.length-1][0],t0+6e4),vals=r.map(x=>cToD(x[1])),tgt=cToD(+c.target);
+  let lo=Math.min(...vals,tgt),hi=Math.max(...vals,tgt);const pad=Math.max(4,(hi-lo)*0.08);lo=Math.floor((lo-pad)/5)*5;hi=Math.ceil((hi+pad)/5)*5;
+  const X=t=>L+(t-t0)/(t1-t0)*(W-L-R),Y=v=>T+(hi-v)/(hi-lo)*(H-T-B);
+  let shade='';for(let i=1;i<r.length;i++)if(r[i][1]>=c.target&&r[i-1][1]>=c.target)shade+=`<rect x="${X(r[i-1][0]).toFixed(1)}" y="${T}" width="${Math.max(.5,X(r[i][0])-X(r[i-1][0])).toFixed(1)}" height="${H-T-B}" fill="var(--acc2)" opacity=".14"/>`;
+  const gp=r.slice(1).map((x,i)=>x[0]-r[i][0]).sort((a,b)=>a-b),brk=Math.max(15*6e4,(gp[Math.floor(gp.length/2)]||0)*2.5),segs=[[0]];
+  for(let i=1;i<r.length;i++){if(r[i][0]-r[i-1][0]>brk)segs.push([]);segs[segs.length-1].push(i)}
+  const yt=[];for(let v=lo;v<=hi;v+=Math.max(5,Math.round((hi-lo)/5/5)*5))yt.push(v);
+  const xt=[0,.25,.5,.75,1].map(f=>t0+f*(t1-t0));
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img" aria-label="Temperature over time">
+   ${yt.map(v=>`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${L-6}" y="${Y(v)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${v}°</text>`).join('')}
+   ${shade}
+   <line x1="${L}" x2="${W-R}" y1="${Y(tgt)}" y2="${Y(tgt)}" stroke="var(--warn)" stroke-dasharray="5 4" stroke-width="1.5"/><text x="${W-R}" y="${Y(tgt)-5}" text-anchor="end" font-size="11" fill="var(--warn)">target ${Math.round(tgt)}°${tU()}</text>
+   ${segs.map(sg=>`<polyline fill="none" stroke="var(--acc)" stroke-width="2.2" stroke-linejoin="round" points="${sg.map(i=>X(r[i][0]).toFixed(1)+','+Y(vals[i]).toFixed(1)).join(' ')}"/>`).join('')}
+   ${xt.map((t,k)=>`<text x="${X(t)}" y="${H-8}" text-anchor="${k===0?'start':k===xt.length-1?'end':'middle'}" font-size="11" fill="var(--muted)">${new Date(t).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</text>`).join('')}
+  </svg><div class="small muted">Shaded = time at or above target. Dashed line = target.</div>`;
+}
+/* ---- Inkbird Bluetooth thermometers (IBT-2X / 4XS / 6XS and other "iBBQ" models) ---- */
+const INK={dev:null,temps:null,temp:null,probe:0,cycleId:null,lastSave:0};
+async function inkConnect(cycleId){
+  if(INK.dev&&INK.dev.gatt.connected){INK.cycleId=cycleId;prepRefresh(true);return}
+  if(!('bluetooth' in navigator))return toast('Bluetooth needs Chrome or Edge on a computer or Android');
+  try{const d=await navigator.bluetooth.requestDevice({filters:[{namePrefix:'iBBQ'},{namePrefix:'IBT'},{namePrefix:'Inkbird'},{namePrefix:'INK'},{services:[0xfff0]}],optionalServices:[0xfff0]});
+    const srv=await d.gatt.connect(),sv=await srv.getPrimaryService(0xfff0);
+    await (await sv.getCharacteristic(0xfff2)).writeValue(new Uint8Array([0x21,0x07,0x06,0x05,0x04,0x03,0x02,0x01,0xb8,0x22,0x00,0x00,0x00,0x00,0x00]));
+    const rt=await sv.getCharacteristic(0xfff4);await rt.startNotifications();
+    rt.addEventListener('characteristicvaluechanged',e=>{const v=e.target.value,t=[];for(let i=0;i+1<v.byteLength;i+=2){const x=v.getUint16(i,true);t.push(x>=0xfff0?null:x/10)}inkTemps(t)});
+    await (await sv.getCharacteristic(0xfff5)).writeValue(new Uint8Array([0x0B,0x01,0x00,0x00,0x00,0x00]));
+    INK.dev=d;INK.cycleId=cycleId;d.addEventListener('gattserverdisconnected',()=>{toast('Inkbird disconnected');prepRefresh()});
+    toast('Inkbird connected — recording every 30 seconds');prepRefresh(true);
+  }catch(e){if(e.name!=='NotFoundError')toast('Inkbird: '+e.message+'. If yours is a Wi-Fi or hygrometer model, use Import Inkbird CSV instead.')}
+}
+function inkTemps(t){INK.temps=t;if(t[INK.probe]==null){const i=t.findIndex(x=>x!=null);if(i>=0)INK.probe=i}INK.temp=t[INK.probe];
+  const lt=$('liveTemp');if(lt&&INK.temp!=null)lt.textContent=fT(INK.temp);
+  const c=INK.cycleId&&db.cycles.find(x=>x.id===INK.cycleId);
+  if(c&&c.status==='Running'&&INK.temp!=null&&Date.now()-INK.lastSave>=30000){INK.lastSave=Date.now();c.readings.push([Date.now(),INK.temp,'inkbird']);save();prepRefresh()}}
+/* ---- CSV import from the Inkbird app ---- */
+function parseTempCSV(text){
+  const lines=text.replace(/^﻿/,'').split(/\r?\n/).filter(l=>l.trim());if(lines.length<2)return null;
+  const sep=[',',';','\t'].sort((a,b)=>lines[0].split(b).length-lines[0].split(a).length)[0];
+  const rows=lines.map(l=>l.split(sep).map(x=>x.trim().replace(/^"|"$/g,'')));const num=v=>/^-?\d+(\.\d+)?$/.test(String(v).replace('°',''));
+  const hdr=rows[0].some(h=>/[a-z]/i.test(h)&&!num(h))?rows[0]:null,data=hdr?rows.slice(1):rows,s=data[0];
+  let tf=null,tc=-1;
+  for(let i=0;i<s.length&&tf==null;i++)if(!num(s[i])&&!isNaN(Date.parse(s[i]))){tc=i;tf=r=>Date.parse(r[i])}
+  if(tf==null&&s.length>1&&!isNaN(Date.parse(s[0]+' '+s[1]))){tc=1;tf=r=>Date.parse(r[0]+' '+r[1])}
+  if(tf==null)return null;
+  const cols=[];for(let i=tc+1;i<s.length;i++){const ok=data.slice(0,30).filter(r=>num(r[i])).length;if(ok>=Math.min(3,data.length))cols.push(i)}
+  if(!cols.length)return null;const h=(hdr||[]).join(' ');
+  const unit=/℉|°F|\(F\)|F\)|Fahrenheit/i.test(h)?'F':/℃|°C|\(C\)|C\)|Celsius/i.test(h)?'C':tU();
+  return {data,tf,cols,hdr,unit};
+}
+function importInkCSV(id,f){if(!f)return;f.text().then(t=>{const P=parseTempCSV(t);if(!P)return toast("Couldn't find time and temperature columns in that file");
+  const c=db.cycles.find(x=>x.id===id),ts=P.data.map(P.tf).filter(x=>!isNaN(x));
+  dlg(`<h3 style="margin-top:0">Import temperatures into run #${c.num}</h3><p class="small muted">${P.data.length} rows from ${fmtDate(Math.min(...ts))} to ${fmtDate(Math.max(...ts))}.</p>
+   <div class="two"><label>Temperature column<select id="ic_col">${P.cols.map(i=>`<option value="${i}">${esc(P.hdr?P.hdr[i]:'Column '+(i+1))} (e.g. ${esc(P.data[0][i])})</option>`).join('')}</select></label>
+   <label>Values are in<select id="ic_u"><option value="F" ${P.unit==='F'?'selected':''}>°F</option><option value="C" ${P.unit==='C'?'selected':''}>°C</option></select></label></div>
+   <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input id="ic_only" type="checkbox" style="width:auto" checked> Only keep readings during this run (${fmtDate(c.start)} → ${c.end?fmtDate(c.end):'now'})</label>
+   <div class="act"><button class="btn xl green" id="ic_go">Import</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`);
+  $('ic_go').onclick=()=>{const col=+$('ic_col').value,u=$('ic_u').value,only=$('ic_only').checked,have=new Set(c.readings.map(r=>r[0]));let n=0;
+    P.data.forEach(r=>{const t=P.tf(r),v=parseFloat(String(r[col]).replace('°',''));if(isNaN(t)||isNaN(v))return;if(only&&(t<c.start-10*6e4||t>(c.end||Date.now())+10*6e4))return;if(have.has(t))return;
+      c.readings.push([t,Math.round((u==='F'?(v-32)*5/9:v)*10)/10,'csv']);n++});
+    c.readings.sort((a,b)=>a[0]-b[0]);audit(`Imported ${n} temperature readings into run #${c.num}`);save();closeDlg();toast(`Imported ${n} readings`);prepRefresh(true)};
+}).catch(()=>toast("Couldn't read that file"))}
+setInterval(()=>{if(db.cycles.some(c=>c.status==='Running'))prepRefresh()},60000);
 
 /* ================= labels ================= */
 function setPageCSS(){
