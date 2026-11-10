@@ -639,7 +639,8 @@ function goSpawn(id){station.spawn=id;station.block=null;station.decision=false;
 function deductSpawn(sb){const l=db.spawn.find(x=>x.id===sb.lotId);if(l&&l.bagWeight&&!sb.deducted){l.remaining=Math.max(0,(l.remaining??l.qty)-l.bagWeight/1000);sb.deducted=true}}
 function spawnStage(id,s){const b=db.spawnBags[id];if(b.stage===s)return;b.stage=s;b.stageHist.push({stage:s,t:Date.now(),op:op()});if(s==='Contaminated')deductSpawn(b);audit(`Spawn ${id} → ${s}`);save();ok();toast(`${id} → ${s}`);renderHome()}
 function spawnLotBags(lot){const bs=Object.values(db.spawnBags).filter(b=>b.lotId===lot);if(!bs.length)return '—';const c={};bs.forEach(b=>c[b.stage]=(c[b.stage]||0)+1);return SPAWN_STAGES.filter(x=>c[x]).map(x=>`${c[x]} ${x.toLowerCase()}`).join(', ')}
-function spawnLabel(id){const b=db.spawnBags[id],l=db.spawn.find(x=>x.id===b.lotId)||{};return {code:id,title:id,lines:['SPAWN · '+[l.species,l.strain].filter(Boolean).join(' '),'Made '+fmtDay(pdate(l.date))]}}
+function spawnLabel(id){const b=db.spawnBags[id],l=db.spawn.find(x=>x.id===b.lotId)||{};
+  return {code:id,title:id,lines:[{t:'SPAWN',s:0.16,b:true},{t:[l.species,l.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(l.date)),s:0.085}]}}
 function printSpawn(ids){ids=ids.filter(i=>db.spawnBags[i]);ids.forEach(i=>db.spawnBags[i].labelPrints=(db.spawnBags[i].labelPrints||0)+1);save();printItems(ids.map(spawnLabel))}
 /* ================= strains & genetics ================= */
 const strainName=x=>x?`${x.species}${x.strain?' — '+x.strain:''}`:'';
@@ -933,7 +934,7 @@ function setPageCSS(){
   if(!s){s=document.createElement('style');s.id='pagecss';document.head.appendChild(s)}
   s.textContent=`.label{width:${w}mm;height:${h}mm;padding:2mm}.label .qr,.label .qr img,.label .qr canvas{width:${q}mm!important;height:${q}mm!important}@media print{@page{size:${w}mm ${h}mm;margin:0}}`;
 }
-const labelHTML=it=>`<div class="label"><div class="qr" data-code="${esc(it.code)}"></div><div><b>${esc(it.title)}</b>${(it.lines||[]).map(l=>`<small>${esc(l)}</small>`).join('')}</div></div>`;
+const labelHTML=it=>`<div class="label"><div class="qr" data-code="${esc(it.code)}"></div><div><b>${esc(it.title)}</b>${(it.lines||[]).map(l=>!l?'':typeof l==='string'?`<small>${esc(l)}</small>`:`<small style="font-size:${Math.round(l.s/0.11*10)}px;${l.b?'font-weight:700;':''}line-height:1.15">${esc(l.t)}</small>`).join('')}</div></div>`;
 function blockLabel(id){const b=db.blocks[id],bt=batchOf(b);return {code:id,title:id,lines:[[bt.species,bt.strain].filter(Boolean).join(' '),'Inoc '+fmtDay(blockInocT(b))]}}
 function renderQR(root){if(typeof QRCode==='undefined'){toast('QR library not loaded (offline?)');return}root.querySelectorAll('.qr').forEach(el=>{el.innerHTML='';new QRCode(el,{text:el.dataset.code,width:168,height:168,correctLevel:QRCode.CorrectLevel.M})})}
 function dialogPrint(items){const z=$('printZone');setPageCSS();z.innerHTML=items.map(labelHTML).join('');renderQR(z);setTimeout(()=>window.print(),350)}
@@ -993,13 +994,19 @@ async function labelBitmap(it){
   const W=Math.ceil(Math.round((+db.settings.labelW||50)*8)/8)*8,H=Math.round((+db.settings.labelH||30)*8),m=12;
   const cv=document.createElement('canvas');cv.width=W;cv.height=H;const g=cv.getContext('2d');
   g.fillStyle='#fff';g.fillRect(0,0,W,H);g.fillStyle='#000';g.imageSmoothingEnabled=false;
-  const q=Math.min(H-2*m,Math.round(W*0.5));
+  const q=Math.min(H-2*m,Math.round(W*0.42));
   if(typeof QRCode!=='undefined'){const tmp=document.createElement('div');new QRCode(tmp,{text:it.code,width:q,height:q,correctLevel:QRCode.CorrectLevel.M});
     const qc=tmp.querySelector('canvas');if(qc)g.drawImage(qc,m,Math.round((H-q)/2),q,q)}
   const x=m+q+10,maxW=W-x-6;let y=m;
-  const fit=(t,size,bold)=>{let f=size;do{g.font=`${bold?'700':'500'} ${f}px system-ui,-apple-system,Segoe UI,Arial,sans-serif`;if(g.measureText(t).width<=maxW)break;f--}while(f>10);return f};
+  const font=(f,bold)=>{g.font=`${bold?'700':'500'} ${f}px system-ui,-apple-system,Segoe UI,Arial,sans-serif`};
+  const fit=(t,size,bold,min)=>{let f=size;do{font(f,bold);if(g.measureText(t).width<=maxW)break;f--}while(f>(min||10));return f};
   const tf=fit(it.title,Math.round(H*0.2),true);y+=tf;g.fillText(it.title,x,y);
-  (it.lines||[]).forEach(l=>{if(!l)return;const f=fit(l,Math.round(H*0.11),false);y+=f+6;if(y<H-4)g.fillText(l,x,y)});
+  (it.lines||[]).forEach(l=>{if(!l)return;const L=typeof l==='string'?{t:l,s:0.11}:l,size=Math.round(H*L.s);
+    let f=fit(L.t,size,L.b,L.wrap?Math.round(size*0.75):10),rows=[L.t];
+    if(L.wrap&&g.measureText(L.t).width>maxW){const words=L.t.split(' ');f=size;
+      const wrapAt=sz=>{font(sz,L.b);const rs=[''];words.forEach(w=>{const tr=rs[rs.length-1]?rs[rs.length-1]+' '+w:w;if(g.measureText(tr).width<=maxW||!rs[rs.length-1])rs[rs.length-1]=tr;else rs.push(w)});return rs};
+      rows=wrapAt(f);while((rows.length>2||rows.some(r=>g.measureText(r).width>maxW))&&f>12){f--;rows=wrapAt(f)}rows=rows.slice(0,2);font(f,L.b)}
+    rows.forEach(r=>{y+=f+5;if(y<H-4)g.fillText(r,x,y)})});
   const px=g.getImageData(0,0,W,H).data,wb=W/8,out=new Uint8Array(wb*H);
   for(let yy=0;yy<H;yy++)for(let xx=0;xx<W;xx++){const k=(yy*W+xx)*4;if(px[k]*0.3+px[k+1]*0.59+px[k+2]*0.11<140)out[yy*wb+(xx>>3)]|=0x80>>(xx&7)}
   return {bits:out,wb,h:H,canvas:cv};
