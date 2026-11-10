@@ -942,21 +942,32 @@ function printItems(items){if(!items.length)return toast('Nothing to print');if(
 /* ================= Phomemo printing over Bluetooth =================
    Sends labels straight to a Phomemo M-series printer (M220/M221/M110/M120…) with no print dialog.
    Each label is drawn at 203 dpi (8 dots per mm), turned into black/white dots and sent as a raster job. */
-const PH={dev:null,ch:null,busy:false,chunk:128};
+const PH={dev:null,ch:null,busy:false,chunk:128,log:[]};
+const phLog=m=>{PH.log.push(m);if(PH.log.length>30)PH.log.shift()};
 let PRINTER='dialog';try{PRINTER=localStorage.getItem('fungatory-printer')||'dialog'}catch(e){}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const PH_SERVICES=[0xff00,0xaf30,0xae30,0xfee7,0x18f0,'49535343-fe7d-4ae5-8fa9-9fafd205e455','e7810a71-73ae-499d-8c15-faa9aef0c3f2'];
+const PH_SERVICES=[0xff00,0xff01,0xff02,0xaf30,0xae30,0xae00,0xfee7,0x18f0,0xffe0,0xfff0,0xff10,0xfd00,'49535343-fe7d-4ae5-8fa9-9fafd205e455','e7810a71-73ae-499d-8c15-faa9aef0c3f2','0000ff00-0000-1000-8000-00805f9b34fb'];
 function setPrinterMode(m){PRINTER=m;try{localStorage.setItem('fungatory-printer',m)}catch(e){}renderHeader()}
-async function phConnect(pick){
-  if(!('bluetooth' in navigator))throw new Error('Bluetooth printing needs Chrome or Edge (computer or Android) and won\'t work inside the claude.ai viewer');
-  if(!PH.dev||pick){PH.ch=null;
-    PH.dev=await navigator.bluetooth.requestDevice({filters:['M','Q','P','D','T','Phomemo'].map(n=>({namePrefix:n})).concat([{services:[0xff00]},{services:[0xaf30]}]),optionalServices:PH_SERVICES});
-    PH.dev.addEventListener('gattserverdisconnected',()=>{PH.ch=null;renderHeader()})}
-  if(!PH.dev.gatt.connected||!PH.ch){const srv=await PH.dev.gatt.connect();PH.ch=null;
-    const svcs=await srv.getPrimaryServices();svcs.sort((a,b)=>(b.uuid.includes('ff00')?1:0)-(a.uuid.includes('ff00')?1:0));
+async function phConnect(pick,all){
+  if(!('bluetooth' in navigator))throw new Error('this browser has no Bluetooth access — use Chrome or Edge on a computer or Android, from your https site (not the claude.ai preview or an iPhone)');
+  if(navigator.bluetooth.getAvailability&&!(await navigator.bluetooth.getAvailability()))throw new Error('Bluetooth is off or unavailable on this computer');
+  if(!PH.dev||pick){PH.ch=null;PH.log=[];
+    phLog(all?'Showing all nearby Bluetooth devices':'Looking for Phomemo printers');
+    PH.dev=await navigator.bluetooth.requestDevice(all?{acceptAllDevices:true,optionalServices:PH_SERVICES}
+      :{filters:['M','Q','P','D','T','Phomemo','Mr'].map(n=>({namePrefix:n})).concat([{services:[0xff00]},{services:[0xaf30]},{services:[0xae30]}]),optionalServices:PH_SERVICES});
+    phLog('Picked: '+(PH.dev.name||'(no name)'));
+    PH.dev.addEventListener('gattserverdisconnected',()=>{PH.ch=null;phLog('Printer disconnected');renderHeader()})}
+  if(!PH.dev.gatt.connected||!PH.ch){
+    let srv;for(let tries=0;;tries++){try{phLog('Connecting…');srv=await PH.dev.gatt.connect();break}catch(e){phLog('Connect failed: '+e.message);if(tries>=2)throw new Error('the printer would not accept the connection. Close the Phomemo app on any phone, remove the printer from this computer\'s Bluetooth settings, turn it off and on, then try again');await sleep(800)}}
+    PH.ch=null;let svcs=[];try{svcs=await srv.getPrimaryServices()}catch(e){phLog('Could not list services: '+e.message)}
+    phLog('Services: '+(svcs.map(x=>String(x.uuid||'?').slice(4,8)).join(', ')||'none visible'));
+    svcs.sort((a,b)=>(b.uuid.includes('ff00')?1:0)-(a.uuid.includes('ff00')?1:0));
     for(const sv of svcs){let cs=[];try{cs=await sv.getCharacteristics()}catch(e){}
-      const c=cs.find(c=>c.properties.writeWithoutResponse)||cs.find(c=>c.properties.write);if(c){PH.ch=c;break}}
-    if(!PH.ch)throw new Error('Connected, but could not find the printer\'s data channel')}
+      const c=cs.find(c=>c.properties.writeWithoutResponse)||cs.find(c=>c.properties.write);
+      const nc=cs.find(x=>String(x.uuid).includes('ff03')&&(x.properties.notify||x.properties.indicate))||cs.find(x=>x.properties.notify||x.properties.indicate);
+      if(c&&nc){try{await nc.startNotifications();nc.addEventListener('characteristicvaluechanged',phOnNotify);phLog('Listening on '+String(nc.uuid||'?').slice(4,8))}catch(e){phLog('Notify failed: '+e.message)}}
+      if(c){PH.ch=c;phLog('Using channel '+String(c.uuid||'?').slice(4,8)+' on service '+String(sv.uuid||'?').slice(4,8));break}}
+    if(!PH.ch)throw new Error('connected, but no print channel was found'+(svcs.length?'':' (the printer may be paired to another device)'))}
   renderHeader();return PH.ch;
 }
 if('bluetooth' in navigator&&navigator.bluetooth.getDevices&&PRINTER==='bt')navigator.bluetooth.getDevices().then(ds=>{if(ds[0]&&!PH.dev){PH.dev=ds[0];PH.dev.addEventListener('gattserverdisconnected',()=>{PH.ch=null;renderHeader()})}}).catch(()=>{});
@@ -980,33 +991,51 @@ async function labelBitmap(it){
   for(let yy=0;yy<H;yy++)for(let xx=0;xx<W;xx++){const k=(yy*W+xx)*4;if(px[k]*0.3+px[k+1]*0.59+px[k+2]*0.11<140)out[yy*wb+(xx>>3)]|=0x80>>(xx&7)}
   return {bits:out,wb,h:H,canvas:cv};
 }
+const PH_MODELS={m220:{name:'M220',proto:'esc',head:72,align:'right'},m221:{name:'M221',proto:'m110',head:72,align:'center'},m110:{name:'M110 / M120 / other',proto:'m110',head:0,align:'left'}};
+function phCfg(){const m=PH_MODELS[db.settings.phModel||'m220']||PH_MODELS.m220;return {proto:db.settings.phProto||m.proto,head:db.settings.phHead!=null?+db.settings.phHead:m.head,align:db.settings.phAlign||m.align}}
+let phWait=null;
+function phOnNotify(e){const v=new Uint8Array(e.target.value.buffer);phLog('Printer says: '+[...v.slice(0,12)].map(x=>x.toString(16).padStart(2,'0')).join(' '));
+  if(phWait&&v[0]===0x1a&&v[1]===0x0f){const w=phWait;phWait=null;w()}}
+const phDone=ms=>new Promise(r=>{phWait=r;setTimeout(()=>{if(phWait===r){phWait=null;r()}},ms)});
 function phJob(b){
-  const d=Math.max(1,Math.min(15,+db.settings.phDensity||10));
-  const head=[0x1b,0x4e,0x0d,0x03, 0x1b,0x4e,0x04,d, 0x1f,0x11,0x0a, 0x1d,0x76,0x30,0x00,b.wb&255,b.wb>>8,b.h&255,b.h>>8];
-  const foot=[0x1f,0xf0,0x05,0x00,0x1f,0xf0,0x03,0x00];
-  const job=new Uint8Array(head.length+b.bits.length+foot.length);job.set(head,0);job.set(b.bits,head.length);job.set(foot,head.length+b.bits.length);return job;
+  const cfg=phCfg(),hb=Math.max(b.wb,cfg.head||0),off=cfg.align==='right'?hb-b.wb:cfg.align==='center'?Math.floor((hb-b.wb)/2):0;
+  const ras=new Uint8Array(hb*b.h);for(let y=0;y<b.h;y++)ras.set(b.bits.subarray(y*b.wb,(y+1)*b.wb),y*hb+off);
+  const d15=Math.max(1,Math.min(15,+db.settings.phDensity||10)),rh=[0x1d,0x76,0x30,0x00,hb&255,hb>>8,b.h&255,b.h>>8];
+  let head,foot;
+  if(cfg.proto==='esc'){head=[0x1b,0x40, 0x1b,0x37,0x07,0x8c,0x02, 0x1d,0x7c,Math.max(1,Math.round(d15/15*8)),...rh];foot=[0x1b,0x4a,0x50]}
+  else{head=[0x1b,0x4e,0x0d,0x03, 0x1b,0x4e,0x04,d15, 0x1f,0x11,0x0a,...rh];foot=[0x1f,0xf0,0x05,0x00,0x1f,0xf0,0x03,0x00]}
+  const job=new Uint8Array(head.length+ras.length+foot.length);job.set(head,0);job.set(ras,head.length);job.set(foot,head.length+ras.length);
+  phLog(`Job: ${cfg.proto==='esc'?'ESC/POS':'M110'} commands, ${hb*8} dots wide, label at ${cfg.align}, darkness ${d15}`);return job;
 }
 async function phPrint(items){
   if(PH.busy)return toast('Printer is busy — wait for the current labels');PH.busy=true;
   try{await phConnect(false);
     for(let i=0;i<items.length;i++){toast(`Printing ${i+1} of ${items.length}…`);const job=phJob(await labelBitmap(items[i]));
-      try{await phWrite(job)}catch(e){if(PH.chunk>20){PH.chunk=20;await sleep(300);await phWrite(job)}else throw e}
-      await sleep(400)}
+      try{await phWrite(job)}catch(e){if(PH.chunk>20){PH.chunk=20;phLog('Retrying with small chunks');await sleep(300);await phWrite(job)}else throw e}
+      await phDone(4000);await sleep(150)}
     toast(`✓ Printed ${items.length} label${items.length>1?'s':''}`);
   }catch(e){if(e.name==='NotFoundError'){toast('No printer chosen')}
     else if(confirm(`Couldn't print over Bluetooth (${e.message}). Use the computer's print dialog instead?`))dialogPrint(items)}
   finally{PH.busy=false;renderHeader()}
 }
+function phTest(){printItems([{code:'TEST-001',title:'TEST-001',lines:['Fungatory test · '+(PRINTER==='bt'?phCfg().align:'dialog'),(db.settings.labelW||50)+' × '+(db.settings.labelH||30)+' mm']}]);if($('dlg').open&&PRINTER==='bt')setTimeout(printerSetup,1500)}
+async function phSetupConnect(all){PH.err='';try{await phConnect(true,all)}catch(e){if(e.name==='NotFoundError'){phLog('No device chosen')}else{PH.err=e.message;phLog('Error: '+e.message)}}printerSetup()}
 function printerSetup(){
   const on=PRINTER==='bt',conn=PH.ch&&PH.dev&&PH.dev.gatt.connected;
   dlg(`<h3 style="margin-top:0">Label printer</h3>
   <label>Print labels with<select onchange="setPrinterMode(this.value);printerSetup()"><option value="bt" ${on?'selected':''}>Phomemo over Bluetooth — prints straight away</option><option value="dialog" ${on?'':'selected'}>Computer print dialog</option></select></label>
   ${on?`<div class="alert ${conn?'ok':'info'}">${conn?`Connected to <b>${esc(PH.dev.name||'printer')}</b>.`:PH.dev?`Last used: <b>${esc(PH.dev.name||'printer')}</b> — it reconnects when you print.`:'Turn the printer on, then tap Connect and pick it from the list.'}</div>
-   <div class="row"><button class="btn" onclick="phConnect(true).then(printerSetup).catch(e=>{if(e.name!=='NotFoundError')toast('Printer: '+e.message)})">${PH.dev?'Connect a different printer':'Connect printer'}</button></div>
+   <div class="row"><button class="btn" onclick="phSetupConnect(false)">${PH.dev?'Connect a different printer':'Connect printer'}</button><button class="btn alt" onclick="phSetupConnect(true)">Printer not in the list? Show all devices</button></div>
+   ${PH.err?`<div class="alert">Couldn't connect: ${esc(PH.err)}</div>`:''}
+   ${PH.log.length?`<details style="margin-top:6px"><summary class="small muted" style="cursor:pointer">Connection details (send these to Claude if it won't connect)</summary><pre class="small" style="white-space:pre-wrap;margin:6px 0">${esc(PH.log.join('\n'))}</pre></details>`:''}
+   <label>Printer model<select onchange="db.settings.phModel=this.value;delete db.settings.phAlign;delete db.settings.phProto;delete db.settings.phHead;save();printerSetup()">${Object.entries(PH_MODELS).map(([k,m])=>`<option value="${k}" ${(db.settings.phModel||'m220')===k?'selected':''}>${m.name}</option>`).join('')}</select></label>
+   <div class="alert info small"><b>Test label came out blank?</b> The label may be sitting under a different part of the print head. Print a test at each position and keep the one that works:
+   <div class="row">${['left','center','right'].map(a=>`<button class="btn ${phCfg().align===a?'':'alt'}" onclick="db.settings.phAlign='${a}';save();phTest()">Test ${a}</button>`).join('')}</div>
+   <div class="row"><span>Still blank at every position?</span><button class="chip" onclick="db.settings.phProto=phCfg().proto==='esc'?'m110':'esc';save();printerSetup()">Switch command set (now: ${phCfg().proto==='esc'?'ESC/POS':'M110'})</button></div></div>
    <label>Darkness <b id="dv">${db.settings.phDensity||10}</b> / 15<input type="range" min="1" max="15" value="${db.settings.phDensity||10}" oninput="$('dv').textContent=this.value" onchange="db.settings.phDensity=+this.value;save()"></label>`
    :'<p class="small muted">Uses the normal print window. Pick the Phomemo there with paper size set to your label and no margins.</p>'}
   <div class="two"><label>Label width (mm)<input type="number" value="${db.settings.labelW||50}" onchange="db.settings.labelW=+this.value;save()"></label><label>Label height (mm)<input type="number" value="${db.settings.labelH||30}" onchange="db.settings.labelH=+this.value;save()"></label></div>
-  <div class="act"><button class="btn xl green" onclick="printItems([{code:'TEST-001',title:'TEST-001',lines:['Fungatory test label',(db.settings.labelW||50)+' × '+(db.settings.labelH||30)+' mm']}])">Print a test label</button><button class="btn alt" onclick="closeDlg()">Done</button></div>`);
+  <div class="act"><button class="btn xl green" onclick="phTest()">Print a test label</button><button class="btn alt" onclick="closeDlg()">Done</button></div>`);
 }
 function printBlocks(ids,isReprint){ids=ids.filter(id=>db.blocks[id]);ids.forEach(id=>{db.blocks[id].labelPrints=(db.blocks[id].labelPrints||0)+1});if(isReprint)audit('Reprinted labels: '+ids.join(', '));save();printItems(ids.map(blockLabel))}
 let labelSel='';
