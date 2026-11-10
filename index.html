@@ -65,6 +65,7 @@ dialog::backdrop{background:#0006}
 .label{border:1px dashed var(--line);border-radius:6px;display:flex;gap:2mm;align-items:center;background:#fff;color:#000;overflow:hidden}
 .label .qr{flex:none}.label b{font-size:14px;display:block;line-height:1.1}.label small{font-size:10px;display:block;line-height:1.2}
 #printZone{display:none}
+a{color:var(--acc)}
 header{background:#00694b;border-bottom:0;color:#fff;box-shadow:0 1px 6px #0003}
 header nav button{color:rgba(255,255,255,.78)}header nav button.on{background:rgba(255,255,255,.2);color:#fff}
 header .chip{background:rgba(255,255,255,.16);color:#fff;border-color:transparent}header .chip.on{border-color:#fff}
@@ -623,15 +624,15 @@ function renderBatches(){
   ${list.map(bt=>{const bl=batchBlocks(bt.id),st=bl.map(blockStats),tot=sum(st.map(s=>s.tot));return `<tr class="click" onclick="openBatch('${bt.id}')"><td><b>${esc(bt.id)}</b></td><td>${esc(bt.species)} ${esc(bt.strain)}</td><td>${esc(bt.recipe)}${bt.recipeVer?' v'+esc(bt.recipeVer):''}</td><td>${fmtDay(pdate(bt.inocDate))}</td><td class="n">${bl.length}/${bt.count}</td><td class="n">${bl.filter(b=>b.stage!=='Closed').length}</td><td class="n">${bl.filter(b=>b.stage==='Closed').length}</td><td class="n">${fmtW(tot)}</td><td class="n">${bl.length?fmtW(tot/bl.length):'—'}</td><td>${batchStatus(bt)==='completed'?'<span class="tag">Completed</span>':'<span class="tag m">Active</span>'}</td></tr>`}).join('')||'<tr><td colspan="10" class="muted">No batches here.</td></tr>'}</table></div>`;
 }
 function openNewBatch(pf){
-  pf=pf||{};const sbag=pf.spawnBag&&db.spawnBags[pf.spawnBag],lot=sbag?db.spawn.find(x=>x.id===sbag.lotId)||{}:{},d=batchDefault(lot.species);
+  pf=pf||{};const sbag=pf.spawnBag&&db.spawnBags[pf.spawnBag],lot=sbag?db.spawn.find(x=>x.id===sbag.lotId)||{}:{},ls=lot.species?strainOf(lot):null;
+  const pre=ls||db.strains.find(x=>x.id===db.settings.lastBatchStrain),d=batchDefault(pre?pre.species:lot.species);
   const sp=speciesAll(),lots=db.spawn.filter(s=>(s.remaining??s.qty)>0||s.id===lot.id);
   dlg(`<h3 style="margin-top:0">Add batch</h3>${sbag?`<div class="alert info small">From spawn bag <b>${esc(sbag.id)}</b> (lot ${esc(lot.id)})</div>`:''}<input type="hidden" id="nb_sbag" value="${sbag?esc(sbag.id):''}">
-  <label>What are you growing?<input id="nb_sp" list="spl" placeholder="e.g. Blue Oyster" value="${esc(lot.species||'')}" autofocus></label>
+  ${strainPicker('nb',pre&&pre.id)}
   <div class="two"><label>How many blocks?<input id="nb_n" type="number" min="1" value="${d.n}"></label><label>Weight per block (${U()})<input id="nb_bw" type="number" step="any" value="${d.w!=null?wOut(d.w):''}" placeholder="e.g. 5"></label></div>
   <label>Inoculated on<input id="nb_id2" type="date" value="${dstr(Date.now())}"></label>
-  <datalist id="spl">${sp.map(s=>`<option>${esc(s)}`).join('')}</datalist>
   <details style="margin:8px 0"><summary class="muted" style="cursor:pointer">More details (optional)</summary><div class="two">
-  <label>Batch number<input id="nb_id" value="${db.settings.nextBatch}"></label><label>Strain<input id="nb_st" value="${esc(lot.strain||'')}"></label>
+  <label>Batch number<input id="nb_id" value="${db.settings.nextBatch}"></label>
   <label>Substrate recipe<select id="nb_rc"><option value="">—</option>${db.recipes.map(r=>`<option value="${r.id}">${esc(r.name)} v${esc(r.version)}</option>`).join('')}</select></label>
   <label>Spawn lot<select id="nb_sl"><option value="">—</option>${lots.map(s=>`<option value="${s.id}" ${s.id===lot.id?'selected':''}>${esc(s.id)} — ${esc(s.species)} ${esc(s.strain)} (${r1(s.remaining??s.qty)} kg left)</option>`).join('')}</select></label>
   <label>Spawn used (kg)<input id="nb_su" type="number" step="any"></label><label>Inoculation rate (%)<input id="nb_ir" type="number" step="any"></label>
@@ -642,7 +643,10 @@ function openNewBatch(pf){
   <label>Ingredient quantities<textarea id="nb_ing"></textarea></label><label>Notes<textarea id="nb_no"></textarea></label></details>
   <div class="act"><button class="btn xl green" onclick="createBatch()">Create batch &amp; print labels</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`);
   $('nb_rc').onchange=e=>{const r=db.recipes.find(x=>x.id===e.target.value);if(r&&!$('nb_ing').value)$('nb_ing').value=r.ingredients||''};
-  $('nb_sl').onchange=e=>{const s=db.spawn.find(x=>x.id===e.target.value);if(s){if(!$('nb_sp').value)$('nb_sp').value=s.species;if(!$('nb_st').value)$('nb_st').value=s.strain}};
+  const useStrain=x=>{if(!x)return;if(![...$('nb_strain').options].some(o=>o.value===x.id)){const o=document.createElement('option');o.value=x.id;o.textContent=strainName(x);$('nb_strain').insertBefore(o,$('nb_strain').lastElementChild)}
+    $('nb_strain').value=x.id;strainPick(x.id,'nb');const dd=batchDefault(x.species);$('nb_n').value=dd.n;if(dd.w!=null)$('nb_bw').value=wOut(dd.w)};
+  $('nb_strain').addEventListener('change',e=>{const x=db.strains.find(y=>y.id===e.target.value);if(x)useStrain(x)});
+  $('nb_sl').onchange=e=>{const s=db.spawn.find(x=>x.id===e.target.value);if(s)useStrain(strainOf(s))};
 }
 function makeBatch(o){
   const id=normId(o.id||String(db.settings.nextBatch||1));
@@ -650,7 +654,7 @@ function makeBatch(o){
   if(!o.species){toast('Enter what you are growing');return null}
   const sl=db.spawn.find(x=>x.id===o.spawnLot),sb=o.spawnBag&&db.spawnBags[o.spawnBag],now=dstr(Date.now());
   if(sl&&o.spawnUsed&&!sb)sl.remaining=Math.max(0,(sl.remaining??sl.qty)-o.spawnUsed);
-  const bt=db.batches[id]={id,species:o.species,strain:o.strain||'',recipe:o.rc?o.rc.name:'',recipeVer:o.rc?o.rc.version:'',recipeId:o.rc?o.rc.id:'',ingredients:o.ingredients||'',
+  const bt=db.batches[id]={id,species:o.species,strain:o.strain||'',strainId:o.strainId||'',recipe:o.rc?o.rc.name:'',recipeVer:o.rc?o.rc.version:'',recipeId:o.rc?o.rc.id:'',ingredients:o.ingredients||'',
     spawnLot:sl?sl.id:'',spawnBag:sb?sb.id:'',spawnUsed:o.spawnUsed||(sb&&sl&&sl.bagWeight?sl.bagWeight/1000:null),cultureLot:sl?sl.cultureId:'',
     inocRate:o.inocRate||'',prepDate:o.prepDate||now,sterilDate:o.sterilDate||now,inocDate:o.inocDate||now,cycleId:o.cycleId||'',count:o.count,blockWeight:o.blockWeight??null,
     operator:o.operator||op(),dryWeight:o.dryWeight||null,notes:o.notes||'',created:Date.now(),prePrinted:true};
@@ -663,7 +667,8 @@ function makeBatch(o){
 }
 function createBatch(){
   const bwIn=+$('nb_bw').value,rc=db.recipes.find(x=>x.id===$('nb_rc').value);
-  const bt=makeBatch({id:$('nb_id').value,species:$('nb_sp').value.trim(),strain:$('nb_st').value.trim(),count:Math.max(1,+$('nb_n').value||1),blockWeight:bwIn>0?Math.round(wIn(bwIn)*10)/10:null,
+  const x=readStrain('nb');if(!x)return;db.settings.lastBatchStrain=x.id;
+  const bt=makeBatch({id:$('nb_id').value,species:x.species,strain:x.strain||'',strainId:x.id,count:Math.max(1,+$('nb_n').value||1),blockWeight:bwIn>0?Math.round(wIn(bwIn)*10)/10:null,
     cycleId:($('nb_cy')||{}).value||'',rc,spawnLot:$('nb_sl').value,spawnBag:$('nb_sbag').value,spawnUsed:+$('nb_su').value||0,inocRate:$('nb_ir').value,prepDate:$('nb_pd').value,sterilDate:$('nb_sd').value,inocDate:$('nb_id2').value,
     operator:$('nb_op').value,dryWeight:+$('nb_dw').value||null,ingredients:$('nb_ing').value,notes:$('nb_no').value});
   if(!bt)return;closeDlg();station.block=null;show('home');printBlocks(batchBlocks(bt.id).map(b=>b.id));
@@ -825,7 +830,7 @@ function culturesCard(){
 function quickBatch(bagId){
   const sb=db.spawnBags[bagId],l=db.spawn.find(x=>x.id===sb.lotId)||{},d=batchDefault(l.species);
   if(!l.species||d.w==null)return openNewBatch({spawnBag:bagId});
-  const bt=makeBatch({species:l.species,strain:l.strain,count:d.n,blockWeight:d.w,spawnLot:l.id,spawnBag:bagId,cycleId:defaultCycle('substrate')});
+  const bt=makeBatch({species:l.species,strain:l.strain,strainId:l.strainId||'',count:d.n,blockWeight:d.w,spawnLot:l.id,spawnBag:bagId,cycleId:defaultCycle('substrate')});
   if(!bt)return;renderHome();printBlocks(batchBlocks(bt.id).map(b=>b.id));
 }
 function askDelSpawn(id){const b=db.spawnBags[id],n=Object.values(db.spawnBags).filter(x=>x.lotId===b.lotId).length;
