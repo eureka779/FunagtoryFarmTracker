@@ -620,8 +620,8 @@ function batchStatus(bt){const bl=batchBlocks(bt.id);return bl.length>=bt.count&
 function renderBatches(){
   const list=Object.values(db.batches).filter(bt=>batchView==='all'||batchStatus(bt)===batchView).sort((a,c)=>c.created-a.created);
   $('batches').innerHTML=`<div class="row"><button class="btn" onclick="openNewBatch()">+ New batch</button><span class="chips">${['active','completed','all'].map(v=>`<button class="chip ${batchView===v?'on':''}" onclick="batchView='${v}';renderBatches()">${v[0].toUpperCase()+v.slice(1)}</button>`).join('')}</span></div>
-  <div class="card scroll"><table><tr><th>Batch</th><th>Species / strain</th><th>Recipe</th><th>Inoculated</th><th class="n">Blocks</th><th class="n">Active</th><th class="n">Closed</th><th class="n">Harvest</th><th class="n">Avg / block</th><th>Status</th></tr>
-  ${list.map(bt=>{const bl=batchBlocks(bt.id),st=bl.map(blockStats),tot=sum(st.map(s=>s.tot));return `<tr class="click" onclick="openBatch('${bt.id}')"><td><b>${esc(bt.id)}</b></td><td>${esc(bt.species)} ${esc(bt.strain)}</td><td>${esc(bt.recipe)}${bt.recipeVer?' v'+esc(bt.recipeVer):''}</td><td>${fmtDay(pdate(bt.inocDate))}</td><td class="n">${bl.length}/${bt.count}</td><td class="n">${bl.filter(b=>b.stage!=='Closed').length}</td><td class="n">${bl.filter(b=>b.stage==='Closed').length}</td><td class="n">${fmtW(tot)}</td><td class="n">${bl.length?fmtW(tot/bl.length):'—'}</td><td>${batchStatus(bt)==='completed'?'<span class="tag">Completed</span>':'<span class="tag m">Active</span>'}</td></tr>`}).join('')||'<tr><td colspan="10" class="muted">No batches here.</td></tr>'}</table></div>`;
+  <div class="card scroll"><table><tr><th>Batch</th><th>Species / strain</th><th>Recipe</th><th>Inoculated</th><th class="n">Blocks</th><th class="n">Active</th><th class="n">Closed</th><th class="n">Harvest</th><th class="n">Avg / block</th><th>Status</th><th></th></tr>
+  ${list.map(bt=>{const bl=batchBlocks(bt.id),st=bl.map(blockStats),tot=sum(st.map(s=>s.tot));return `<tr class="click" onclick="openBatch('${bt.id}')"><td><b>${esc(bt.id)}</b></td><td>${esc(bt.species)} ${esc(bt.strain)}</td><td>${esc(bt.recipe)}${bt.recipeVer?' v'+esc(bt.recipeVer):''}</td><td>${fmtDay(pdate(bt.inocDate))}</td><td class="n">${bl.length}/${bt.count}</td><td class="n">${bl.filter(b=>b.stage!=='Closed').length}</td><td class="n">${bl.filter(b=>b.stage==='Closed').length}</td><td class="n">${fmtW(tot)}</td><td class="n">${bl.length?fmtW(tot/bl.length):'—'}</td><td>${batchStatus(bt)==='completed'?'<span class="tag">Completed</span>':'<span class="tag m">Active</span>'}</td><td><button class="chip" title="Delete batch" onclick="event.stopPropagation();delBatch('${bt.id}')">✕</button></td></tr>`}).join('')||'<tr><td colspan="10" class="muted">No batches here.</td></tr>'}</table></div>`;
 }
 function openNewBatch(pf){
   pf=pf||{};const sbag=pf.spawnBag&&db.spawnBags[pf.spawnBag],lot=sbag?db.spawn.find(x=>x.id===sbag.lotId)||{}:{},ls=lot.species?strainOf(lot):null;
@@ -863,6 +863,17 @@ function spawnCard(sb){
    <div class="row" style="margin-top:16px;justify-content:space-between"><span class="chips">${can('lab')?`<button class="chip" onclick="printSpawn(['${sb.id}'])">Reprint label</button><button class="chip" onclick="askDelSpawn('${sb.id}')">Delete…</button>`:''}</span>
    <button class="btn alt" onclick="station.spawn=null;renderHome()">Done</button></div></div>`;
 }
+function delBatch(id){
+  const bt=db.batches[id];if(!bt)return;const bl=batchBlocks(id),ids=new Set(bl.map(b=>b.id)),hs=db.harvests.filter(h=>ids.has(h.blockId)&&!h.void),tot=sum(hs.map(h=>h.grams));
+  if(!confirm(`Delete batch ${id} and its ${bl.length} block${bl.length===1?'':'s'}?${hs.length?`\n\n⚠ This also deletes ${hs.length} harvest record${hs.length===1?'':'s'} (${fmtW(tot)}). Yield history for this batch will be gone.`:''}\n\nThis can't be undone.`))return;
+  if(hs.length&&prompt(`Type the batch number (${id}) to confirm deleting its harvest records`)!==String(id))return toast('Not deleted');
+  bl.forEach(b=>delete db.blocks[b.id]);db.harvests=db.harvests.filter(h=>!ids.has(h.blockId));
+  const sb=bt.spawnBag&&db.spawnBags[bt.spawnBag];
+  if(sb){sb.batches=(sb.batches||[]).filter(x=>x!==id);if(!sb.batches.length&&sb.stage==='Used'){sb.stage='Ready';sb.stageHist.push({stage:'Ready',t:Date.now(),op:op()});
+    const l=db.spawn.find(x=>x.id===sb.lotId);if(l&&l.bagWeight&&sb.deducted){l.remaining=(l.remaining??l.qty)+l.bagWeight/1000;sb.deducted=false}}}
+  delete db.batches[id];if(station.block&&!db.blocks[station.block])station.block=null;
+  audit(`Deleted batch ${id} (${bl.length} blocks${hs.length?', '+hs.length+' harvests':''})`);save();closeDlg();toast(`Batch ${id} deleted`);render();
+}
 function setBatchWeight(id){const bt=db.batches[id],v=prompt(`Weight per block (${U()}) — applies to every block in batch ${id} that hasn't been weighed individually`,bt.blockWeight!=null?wOut(bt.blockWeight):'');if(v===null)return;
   const g=+v>0?Math.round(wIn(+v)*10)/10:null,old=bt.blockWeight;bt.blockWeight=g;
   batchBlocks(id).forEach(b=>{if(b.startWeight==null||b.startWeight===old){if(b.startWeight!==g)b.edits.push({t:Date.now(),op:op(),field:'startWeight',from:b.startWeight,to:g});b.startWeight=g}});
@@ -880,6 +891,7 @@ function openBatch(id){
   <div class="row"><button class="btn alt" onclick="printBlocks(batchBlocks('${id}').map(b=>b.id),true)">Print all labels</button>
    <button class="btn alt" onclick="const n=prompt('Total number of blocks in this batch',${bt.count});if(n&&+n>=batchBlocks('${id}').length){const bt=db.batches['${id}'];bt.count=+n;const m=addBlocks(bt);save();openBatch('${id}');if(m.length)printBlocks(m)}">Change block count</button>
    <button class="btn alt" onclick="setBatchWeight('${id}')">Block weight: ${fmtW(bt.blockWeight)}</button>
+   ${can('lab')?`<button class="btn danger" onclick="delBatch('${id}')">Delete batch</button>`:''}
    <select onchange="if(this.value){batchBlocks('${id}').filter(b=>b.stage!=='Closed').forEach(b=>blockStage(b.id,this.value,true));openBatch('${id}')}"><option value="">Move all active blocks…</option>${STAGES.filter(s=>s!=='Closed').map(s=>`<option>${s}</option>`).join('')}</select></div>
   <div class="scroll"><table style="margin-top:8px"><tr><th>Block</th><th>Stage</th><th>Location</th><th class="n">Start</th><th class="n">F1</th><th class="n">F2</th><th class="n">F3+</th><th class="n">Total</th></tr>
   ${bl.map((b,i)=>{const s=st[i],f3=sum(Object.entries(s.byF).filter(([f])=>+f>=3).map(([,g])=>g));return `<tr class="click" onclick="openBlock('${b.id}')"><td>${esc(b.id)}</td><td>${b.stage}${b.closure?` <span class="tag">${esc(b.closure.reason)}</span>`:''}</td><td>${esc(locStr(curLoc(b)))}</td><td class="n">${fmtW(b.startWeight)}</td><td class="n">${fmtW(s.byF[1])}</td><td class="n">${fmtW(s.byF[2])}</td><td class="n">${f3?fmtW(f3):'—'}</td><td class="n">${fmtW(s.tot)}</td></tr>`}).join('')}</table></div>
