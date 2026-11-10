@@ -1200,31 +1200,49 @@ function inkTemps(t){INK.temps=t;if(t[INK.probe]==null){const i=t.findIndex(x=>x
   const c=INK.cycleId&&db.cycles.find(x=>x.id===INK.cycleId);
   if(c&&c.status==='Running'&&INK.temp!=null&&Date.now()-INK.lastSave>=30000){INK.lastSave=Date.now();c.readings.push([Date.now(),INK.temp,'inkbird']);save();prepRefresh()}}
 /* ---- CSV import from the Inkbird app ---- */
+/* Reads timestamps like "2026/11/09 02:45 p.m.", "11/9/2026 2:45 PM", "2026-11-09 14:45:00" as local time */
+function parseStamp(v){
+  v=String(v||'').trim();if(!v)return NaN;
+  const m=v.match(/^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap])?\.?\s*m?\.?$/i)
+        ||v.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap])?\.?\s*m?\.?$/i);
+  if(m){let y,mo,d;if(m[1].length===4){y=+m[1];mo=+m[2];d=+m[3]}else{y=+m[3];mo=+m[1];d=+m[2]}
+    let h=+m[4];const ap=(m[7]||'').toLowerCase();if(ap==='p'&&h<12)h+=12;if(ap==='a'&&h===12)h=0;
+    return new Date(y,mo-1,d,h,+m[5],+(m[6]||0)).getTime()}
+  const t=Date.parse(v.replace(/\b([ap])\.m\./ig,'$1m'));return t;
+}
 function parseTempCSV(text){
   const lines=text.replace(/^﻿/,'').split(/\r?\n/).filter(l=>l.trim());if(lines.length<2)return null;
-  const sep=[',',';','\t'].sort((a,b)=>lines[0].split(b).length-lines[0].split(a).length)[0];
-  const rows=lines.map(l=>l.split(sep).map(x=>x.trim().replace(/^"|"$/g,'')));const num=v=>/^-?\d+(\.\d+)?$/.test(String(v).replace('°',''));
-  const hdr=rows[0].some(h=>/[a-z]/i.test(h)&&!num(h))?rows[0]:null,data=hdr?rows.slice(1):rows,s=data[0];
+  const sep=['\t',';',','].sort((a,b)=>lines[0].split(b).length-lines[0].split(a).length)[0];
+  const rows=lines.map(l=>l.split(sep).map(x=>x.trim().replace(/^"|"$/g,'')));
+  const num=v=>/^-?\d+(\.\d+)?$/.test(String(v).replace(/\s*(°|℉|℃)\s*[CF]?$/i,'').trim());
+  const hdr=rows[0].some(h=>/[a-z]/i.test(h)&&!num(h)&&isNaN(parseStamp(h)))?rows[0]:null,data=(hdr?rows.slice(1):rows).filter(r=>r.some(x=>x)),s=data[0];
   let tf=null,tc=-1;
-  for(let i=0;i<s.length&&tf==null;i++)if(!num(s[i])&&!isNaN(Date.parse(s[i]))){tc=i;tf=r=>Date.parse(r[i])}
-  if(tf==null&&s.length>1&&!isNaN(Date.parse(s[0]+' '+s[1]))){tc=1;tf=r=>Date.parse(r[0]+' '+r[1])}
+  for(let i=0;i<s.length&&tf==null;i++)if(!num(s[i])&&!isNaN(parseStamp(s[i]))){tc=i;tf=r=>parseStamp(r[i])}
+  if(tf==null&&s.length>1&&!isNaN(parseStamp(s[0]+' '+s[1]))){tc=1;tf=r=>parseStamp(r[0]+' '+r[1])}
   if(tf==null)return null;
   const cols=[];for(let i=tc+1;i<s.length;i++){const ok=data.slice(0,30).filter(r=>num(r[i])).length;if(ok>=Math.min(3,data.length))cols.push(i)}
-  if(!cols.length)return null;const h=(hdr||[]).join(' ');
-  const unit=/℉|°F|\(F\)|F\)|Fahrenheit/i.test(h)?'F':/℃|°C|\(C\)|C\)|Celsius/i.test(h)?'C':tU();
-  return {data,tf,cols,hdr,unit};
+  if(!cols.length)return null;
+  const txt=(hdr||[]).join(' ')+' '+data.slice(0,5).map(r=>r.filter((x,i)=>!cols.includes(i)&&i!==tc).join(' ')).join(' ')+' '+data.slice(0,3).map(r=>cols.map(i=>r[i]).join(' ')).join(' ');
+  const unit=/℉|°\s*F\b|\(F\)|Fahrenheit|\bF\b/i.test(txt)?'F':/℃|°\s*C\b|\(C\)|Celsius|\bC\b/i.test(txt)?'C':tU();
+  const val=v=>parseFloat(String(v).replace(/[^\d.\-]/g,''));
+  return {data,tf,cols,hdr,unit,val};
 }
 function importInkCSV(id,f){if(!f)return;f.text().then(t=>{const P=parseTempCSV(t);if(!P)return toast("Couldn't find time and temperature columns in that file");
-  const c=db.cycles.find(x=>x.id===id),ts=P.data.map(P.tf).filter(x=>!isNaN(x));
-  dlg(`<h3 style="margin-top:0">Import temperatures into run #${c.num}</h3><p class="small muted">${P.data.length} rows from ${fmtDate(Math.min(...ts))} to ${fmtDate(Math.max(...ts))}.</p>
+  const c=db.cycles.find(x=>x.id===id),ts=P.data.map(P.tf).filter(x=>!isNaN(x)),t0=Math.min(...ts),t1=Math.max(...ts);
+  const inRun=ts.filter(x=>x>=c.start-10*6e4&&x<=(c.end||Date.now())+10*6e4).length,mostlyOutside=inRun<ts.length*0.5,fresh=!c.readings.length;
+  dlg(`<h3 style="margin-top:0">Import temperatures into run #${c.num}</h3><p class="small muted">${ts.length} readings from <b>${fmtDate(t0)}</b> to <b>${fmtDate(t1)}</b>.</p>
    <div class="two"><label>Temperature column<select id="ic_col">${P.cols.map(i=>`<option value="${i}">${esc(P.hdr?P.hdr[i]:'Column '+(i+1))} (e.g. ${esc(P.data[0][i])})</option>`).join('')}</select></label>
    <label>Values are in<select id="ic_u"><option value="F" ${P.unit==='F'?'selected':''}>°F</option><option value="C" ${P.unit==='C'?'selected':''}>°C</option></select></label></div>
-   <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input id="ic_only" type="checkbox" style="width:auto" checked> Only keep readings during this run (${fmtDate(c.start)} → ${c.end?fmtDate(c.end):'now'})</label>
+   ${mostlyOutside?`<div class="alert info small">Most of this data is from before or after the run's times (${fmtDate(c.start)} → ${c.end?fmtDate(c.end):'now'}).</div>`:''}
+   <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input id="ic_fit" type="radio" name="ic_mode" style="width:auto" ${fresh||mostlyOutside?'checked':''}> Use all of it and set this run's start and end to match the data</label>
+   <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input id="ic_only" type="radio" name="ic_mode" style="width:auto" ${fresh||mostlyOutside?'':'checked'}> Only keep readings during the run's current times (${inRun} of ${ts.length})</label>
    <div class="act"><button class="btn xl green" id="ic_go">Import</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`);
   $('ic_go').onclick=()=>{const col=+$('ic_col').value,u=$('ic_u').value,only=$('ic_only').checked,have=new Set(c.readings.map(r=>r[0]));let n=0;
-    P.data.forEach(r=>{const t=P.tf(r),v=parseFloat(String(r[col]).replace('°',''));if(isNaN(t)||isNaN(v))return;if(only&&(t<c.start-10*6e4||t>(c.end||Date.now())+10*6e4))return;if(have.has(t))return;
-      c.readings.push([t,Math.round((u==='F'?(v-32)*5/9:v)*10)/10,'csv']);n++});
-    c.readings.sort((a,b)=>a[0]-b[0]);audit(`Imported ${n} temperature readings into run #${c.num}`);save();closeDlg();toast(`Imported ${n} readings`);prepRefresh(true)};
+    if(!only){c.start=Math.min(t0,c.readings.length?c.readings[0][0]:t0);if(c.status!=='Running'||t1<Date.now()-60*6e4)c.end=Math.max(t1,c.end||0)}
+    P.data.forEach(r=>{const t=P.tf(r),v=P.val(r[col]);if(isNaN(t)||isNaN(v))return;if(only&&(t<c.start-10*6e4||t>(c.end||Date.now())+10*6e4))return;if(have.has(t))return;
+      c.readings.push([t,Math.round((u==='F'?(v-32)*5/9:v)*10)/10,'csv']);have.add(t);n++});
+    c.readings.sort((a,b)=>a[0]-b[0]);audit(`Imported ${n} temperature readings into run #${c.num}`);save();closeDlg();
+    const st=cycleStats(c);toast(`Imported ${n} readings — held ≥${fT(c.target)} for ${fDur(st.held)}`);prepRefresh(true)};
 }).catch(()=>toast("Couldn't read that file"))}
 setInterval(()=>{if(db.cycles.some(c=>c.status==='Running'))prepRefresh()},60000);
 
