@@ -279,7 +279,7 @@ const ROLES={
   grow:{icon:'🌱',name:'Incubation / Fruiting',desc:'Move blocks into fruiting, mark contamination, finish blocks.'},
   harvest:{icon:'⚖️',name:'Harvesting',desc:'Scan a block, set mushrooms on the scale. Nothing else.'},
   all:{icon:'🗂',name:'Office — everything',desc:'All screens: dashboards, planning, tasks, settings.'}};
-var ROLE=null,QUICK=false;try{ROLE=localStorage.getItem('fungatory-role');QUICK=localStorage.getItem('fungatory-quick')==='1'}catch(e){}
+var ROLE=null,QUICK=false,QUICK_SPAWN=true;try{ROLE=localStorage.getItem('fungatory-role');QUICK=localStorage.getItem('fungatory-quick')==='1';QUICK_SPAWN=localStorage.getItem('fungatory-quickspawn')!=='0'}catch(e){}
 if(ROLE&&!ROLES[ROLE])ROLE=null;
 const can=(...rs)=>!ROLE||ROLE==='all'||rs.includes(ROLE);
 function setRole(r){ROLE=r;try{localStorage.setItem('fungatory-role',r)}catch(e){}closeDlg();station.block=null;station.spawn=null;show('home')}
@@ -353,7 +353,8 @@ function handleScan(raw){
     return;
   }
   const id=normId(code),b=db.blocks[id];
-  if(!b&&db.spawnBags[id]){if($('dlg').open)closeDlg();beep();return goSpawn(id)}
+  if(!b&&db.spawnBags[id]){if($('dlg').open)closeDlg();beep();goSpawn(id);const sb=db.spawnBags[id];
+    if(ROLE==='lab'&&QUICK_SPAWN&&(sb.stage==='Colonizing'||sb.stage==='Ready'))quickBatch(id);return}
   if(!b&&db.cultureJars[id]){if($('dlg').open)closeDlg();beep();return goCulture(id)}
   if(!b){if(db.batches[id]){openBatch(id);return}beep(250);toast('Unknown ID: '+id);return}
   if($('dlg').open)closeDlg();
@@ -524,7 +525,8 @@ function idleCard(){
   const adds=`<div class="row" style="justify-content:center;gap:10px"><button class="btn xl" style="max-width:220px" onclick="openNewBatch()">+ Add batch</button><button class="btn xl alt" style="max-width:220px" onclick="openNewSpawn()">+ Add spawn</button><button class="btn xl alt" style="max-width:220px" onclick="openNewCulture()">+ Add LC</button></div>`;
   const head=(icon,t,sub)=>`<div style="font-size:46px;line-height:1">${icon}</div><div style="font-size:24px;font-weight:700;margin:10px 0 4px">${t}</div><p class="muted" style="margin:0 0 22px">${sub}</p>`;
   let inner;
-  if(ROLE==='lab')inner=head('🧪','Scan a culture or spawn bag','A liquid culture starts master spawn. A spawn bag starts a batch of blocks.')+adds;
+  if(ROLE==='lab'){const r=spawnRatio();inner=head('🧪','Scan a culture or spawn bag',QUICK_SPAWN?`Scanning a spawn bag starts its batch right away and prints the labels (${r.lb} lb bag → ${r.blocks} blocks).`:'A liquid culture starts master spawn. A spawn bag starts a batch of blocks.')+adds+
+    `<label style="display:inline-flex;gap:8px;align-items:center;color:var(--ink);font-size:15px;margin-top:16px"><input type="checkbox" style="width:auto" ${QUICK_SPAWN?'checked':''} onchange="QUICK_SPAWN=this.checked;try{localStorage.setItem('fungatory-quickspawn',this.checked?'1':'0')}catch(e){};renderHome()"> Auto-start a batch when a spawn bag is scanned</label>`}
   else if(ROLE==='grow'){const inc=Object.values(db.blocks).filter(b=>b.stage==='Inoculated'||b.stage==='Incubating').length,fr=Object.values(db.blocks).filter(b=>b.stage==='Fruiting'||b.stage==='Between flushes').length;
     inner=head('🌱','Scan a block',QUICK?'Incubating blocks go straight to fruiting when scanned.':'Move it to fruiting, mark contamination, or finish it.')+
     `<label style="display:inline-flex;gap:8px;align-items:center;color:var(--ink);font-size:15px"><input type="checkbox" style="width:auto" ${QUICK?'checked':''} onchange="setQuick(this.checked)"> Quick mode — scanning an incubating block moves it to fruiting</label>
@@ -636,7 +638,7 @@ function renderBatches(){
 }
 function openNewBatch(pf){
   pf=pf||{};const sbag=pf.spawnBag&&db.spawnBags[pf.spawnBag],lot=sbag?db.spawn.find(x=>x.id===sbag.lotId)||{}:{},ls=lot.species?strainOf(lot):null;
-  const pre=ls||db.strains.find(x=>x.id===db.settings.lastBatchStrain),d=batchDefault(pre?pre.species:lot.species);
+  const pre=ls||db.strains.find(x=>x.id===db.settings.lastBatchStrain),d=batchDefault(pre?pre.species:lot.species);if(sbag)d.n=blocksFromBag(lot);
   const sp=speciesAll(),lots=db.spawn.filter(s=>(s.remaining??s.qty)>0||s.id===lot.id);
   dlg(`<h3 style="margin-top:0">Add batch</h3>${sbag?`<div class="alert info small">From spawn bag <b>${esc(sbag.id)}</b> (lot ${esc(lot.id)})</div>`:''}<input type="hidden" id="nb_sbag" value="${sbag?esc(sbag.id):''}">
   ${strainPicker('nb',pre&&pre.id)}
@@ -838,10 +840,13 @@ function culturesCard(){
      return `<tr><td><b>${esc(c.id)}</b></td><td>${esc(c.species)} ${esc(c.strain)}</td><td>${fmtDay(pdate(c.date))}</td><td>${esc(c.source||'')}</td><td>${esc(c.media||'')}</td><td class="n">${c.volume?c.volume+' ml':'—'}</td><td>${cultureLotJars(c.id)}</td><td>${made.map(esc).join(', ')||'—'}</td><td>${can('lab')?`<button class="chip" onclick="delCultureLot('${esc(c.id)}')">✕</button>`:''}</td></tr>`}).join('')||'<tr><td colspan="9" class="muted">No cultures yet.</td></tr>'}</table></div>
    <div class="row"><button class="btn" onclick="openNewCulture()">+ Add liquid culture</button><span class="small muted">Each jar gets its own label. Scan one on the home screen to start master spawn from it.</span></div></div>`;
 }
+/* How many fruiting blocks one spawn bag makes. Default: a 7 lb bag makes 12 blocks; bags of other weights scale. */
+function spawnRatio(){const r=db.settings.spawnRatio||{};return {lb:+r.lb||7,blocks:+r.blocks||12}}
+function blocksFromBag(l){const r=spawnRatio();if(!l||!l.bagWeight)return r.blocks;return Math.max(1,Math.round(l.bagWeight/453.592/r.lb*r.blocks))}
 function quickBatch(bagId){
   const sb=db.spawnBags[bagId],l=db.spawn.find(x=>x.id===sb.lotId)||{},d=batchDefault(l.species);
   if(!l.species||d.w==null)return openNewBatch({spawnBag:bagId});
-  const bt=makeBatch({species:l.species,strain:l.strain,strainId:l.strainId||'',count:d.n,blockWeight:d.w,spawnLot:l.id,spawnBag:bagId,cycleId:defaultCycle('substrate')});
+  const bt=makeBatch({species:l.species,strain:l.strain,strainId:l.strainId||'',count:blocksFromBag(l),blockWeight:d.w,spawnLot:l.id,spawnBag:bagId,cycleId:defaultCycle('substrate')});
   if(!bt)return;renderHome();printBlocks(batchBlocks(bt.id).map(b=>b.id));
 }
 function askDelSpawn(id){const b=db.spawnBags[id],n=Object.values(db.spawnBags).filter(x=>x.lotId===b.lotId).length;
@@ -858,8 +863,8 @@ function delSpawnLot(id){const bags=Object.values(db.spawnBags).filter(b=>b.lotI
   bags.forEach(b=>delete db.spawnBags[b.id]);db.spawn=db.spawn.filter(x=>x.id!==id);
   audit(`Deleted spawn lot ${id}`);save();toast('Spawn lot '+id+' deleted');if(station.spawn&&!db.spawnBags[station.spawn])station.spawn=null;render()}
 function spawnCard(sb){
-  const l=db.spawn.find(x=>x.id===sb.lotId)||{},d=batchDefault(l.species),st=sb.stage,age=Math.floor((Date.now()-sb.stageHist[0].t)/DAY);
-  const quick=d.w!=null?`${d.n} blocks × ${fmtW(d.w)}`:'set up batch';let body;
+  const l=db.spawn.find(x=>x.id===sb.lotId)||{},d=batchDefault(l.species),st=sb.stage,age=Math.floor((Date.now()-sb.stageHist[0].t)/DAY),nb=blocksFromBag(l);
+  const quick=d.w!=null?`${nb} blocks × ${fmtW(d.w)}`:`${nb} blocks`;let body;
   if(st==='Contaminated')body=`<div class="alert">Marked contaminated ${fmtDay(sb.stageHist[sb.stageHist.length-1].t)}.</div>`;
   else if(st==='Used'){const last=sb.batches[sb.batches.length-1];
     body=`<div class="alert ok">Used for batch${sb.batches.length>1?'es':''} ${sb.batches.map(x=>`<a href="#" onclick="openBatch('${x}');return false"><b>${esc(x)}</b></a>`).join(', ')}</div>
@@ -1456,6 +1461,9 @@ function renderSettings(){setTimeout(()=>probeCheck(false),0);
    ${num('rearm','Re-arm when scale drops below (g)')}${num('bagWeight','Empty bag weight (g)')}${num('stableTol','Stable when weight changes less than (g)')}${num('stableMs','…for this long (ms)',50)}</div>
    ${chk('bagIncluded','Starting and final block weights include the bag (bag weight is subtracted for yield %)')}
    ${chk('autoHarvest','Auto-record harvest weights when stable')}</div>
+  <div class="card"><b>Spawn to blocks</b><p class="small muted" style="margin:4px 0">Scanning a spawn bag creates this many block labels. Bags of a different weight scale automatically (e.g. a 3.5 lb bag makes half).</p>
+   <div class="row" style="margin-top:0">Each <input type="number" step="any" style="width:80px" value="${spawnRatio().lb}" onchange="db.settings.spawnRatio=Object.assign(spawnRatio(),{lb:+this.value||7});save()"> lb spawn bag makes
+   <input type="number" min="1" style="width:80px" value="${spawnRatio().blocks}" onchange="db.settings.spawnRatio=Object.assign(spawnRatio(),{blocks:+this.value||12});save()"> fruiting blocks</div></div>
   <div class="card"><b>Planning</b><div class="two">${num('buffer','Demand buffer (%)')}${num('capInoc','Inoculation / sterilization capacity (blocks per week)')}${num('horizon','Forecast horizon (weeks)',1)}</div>
    ${chk('useMeasured','Use measured historical performance once enough data exists')}</div>
   <div class="card"><b>Data</b><p class="muted small">${SYNC.on?`Shared through the server — every device on this site sees the same data, and the server keeps a daily backup. ${SYNC.state==='offline'?'<b>Currently offline</b> — changes are saved here and will sync.':''}`:'Stored only in this browser. Open Fungatory from your website to share data between devices.'}</p>
