@@ -677,7 +677,7 @@ function deductSpawn(sb){const l=db.spawn.find(x=>x.id===sb.lotId);if(l&&l.bagWe
 function spawnStage(id,s){const b=db.spawnBags[id];if(b.stage===s)return;b.stage=s;b.stageHist.push({stage:s,t:Date.now(),op:op()});if(s==='Contaminated')deductSpawn(b);audit(`Spawn ${id} → ${s}`);save();ok();toast(`${id} → ${s}`);renderHome()}
 function spawnLotBags(lot){const bs=Object.values(db.spawnBags).filter(b=>b.lotId===lot);if(!bs.length)return '—';const c={};bs.forEach(b=>c[b.stage]=(c[b.stage]||0)+1);return SPAWN_STAGES.filter(x=>c[x]).map(x=>`${c[x]} ${x.toLowerCase()}`).join(', ')}
 function spawnLabel(id){const b=db.spawnBags[id],l=db.spawn.find(x=>x.id===b.lotId)||{};
-  return {code:id,title:id,lines:[{t:l.gen==='Master'?'MASTER SPAWN':'SPAWN',s:0.12,b:true},{t:[l.species,l.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(l.date)),s:0.085}]}}
+  return {code:id,title:id,lines:[{t:l.gen==='Master'?'MASTER SPAWN':'SPAWN',s:0.12,b:true},{t:[l.species,l.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(l.date)),s:0.11}]}}
 function printSpawn(ids){ids=ids.filter(i=>db.spawnBags[i]);ids.forEach(i=>db.spawnBags[i].labelPrints=(db.spawnBags[i].labelPrints||0)+1);save();printItems(ids.map(spawnLabel))}
 /* ================= strains & genetics ================= */
 const strainName=x=>x?`${x.species}${x.strain?' — '+x.strain:''}`:'';
@@ -763,7 +763,7 @@ function quickSpawn(jarId){
 const LC_STAGES=['Growing','Ready','Empty','Contaminated'];
 function goCulture(id){station.culture=id;station.spawn=null;station.block=null;station.decision=false;station.finishing=false;if(mode.type!=='stage'&&mode.type!=='loc')mode={type:'lookup'};show('home')}
 function cultureLabel(id){const j=db.cultureJars[id],c=db.cultures.find(x=>x.id===j.lotId)||{};
-  return {code:id,title:id,lines:[{t:'LIQUID CULTURE',s:0.11,b:true},{t:[c.species,c.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(c.date)),s:0.085}]}}
+  return {code:id,title:id,lines:[{t:'LIQUID CULTURE',s:0.11,b:true},{t:[c.species,c.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(c.date)),s:0.11}]}}
 function printCulture(ids){ids=ids.filter(i=>db.cultureJars[i]);ids.forEach(i=>db.cultureJars[i].labelPrints=(db.cultureJars[i].labelPrints||0)+1);save();printItems(ids.map(cultureLabel))}
 function cultureLotJars(lot){const js=Object.values(db.cultureJars).filter(j=>j.lotId===lot);if(!js.length)return '—';const c={};js.forEach(j=>c[j.stage]=(c[j.stage]||0)+1);return LC_STAGES.filter(x=>c[x]).map(x=>`${c[x]} ${x.toLowerCase()}`).join(', ')}
 function openNewCulture(){
@@ -1218,7 +1218,7 @@ function setPageCSS(){
   s.textContent=`.label{width:${w}mm;height:${h}mm;padding:2mm}.label .qr,.label .qr img,.label .qr canvas{width:${q}mm!important;height:${q}mm!important}@media print{@page{size:${w}mm ${h}mm;margin:0}}`;
 }
 const labelHTML=it=>`<div class="label"><div class="qr" data-code="${esc(it.code)}"></div><div><b>${esc(it.title)}</b>${(it.lines||[]).map(l=>!l?'':typeof l==='string'?`<small>${esc(l)}</small>`:`<small style="font-size:${Math.round(l.s/0.11*10)}px;${l.b?'font-weight:700;':''}line-height:1.15">${esc(l.t)}</small>`).join('')}</div></div>`;
-function blockLabel(id){const b=db.blocks[id],bt=batchOf(b);return {code:id,title:id,lines:[{t:'FB',s:0.12,b:true},{t:[bt.species,bt.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Inoc '+fmtDay(blockInocT(b)),s:0.085}]}}
+function blockLabel(id){const b=db.blocks[id],bt=batchOf(b);return {code:id,title:id,lines:[{t:'FB',s:0.12,b:true},{t:[bt.species,bt.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Inoc '+fmtDay(blockInocT(b)),s:0.11}]}}
 function renderQR(root){if(typeof QRCode==='undefined'){toast('QR library not loaded (offline?)');return}root.querySelectorAll('.qr').forEach(el=>{el.innerHTML='';new QRCode(el,{text:el.dataset.code,width:168,height:168,correctLevel:QRCode.CorrectLevel.M})})}
 function dialogPrint(items){const z=$('printZone');setPageCSS();z.innerHTML=items.map(labelHTML).join('');renderQR(z);setTimeout(()=>window.print(),350)}
 function printItems(items){if(!items.length)return toast('Nothing to print');if(PRINTER==='bt')return phPrint(items);dialogPrint(items)}
