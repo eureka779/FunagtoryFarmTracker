@@ -65,6 +65,10 @@ dialog::backdrop{background:#0006}
 .label{border:1px dashed var(--line);border-radius:6px;display:flex;gap:2mm;align-items:center;background:#fff;color:#000;overflow:hidden}
 .label .qr{flex:none}.label b{font-size:14px;display:block;line-height:1.1}.label small{font-size:10px;display:block;line-height:1.2}
 #printZone{display:none}
+#login{position:fixed;inset:0;z-index:40;background:var(--bg);overflow:auto;padding:24px 16px 80px}
+#login .lbox{max-width:520px;margin:0 auto}#login .lhead img{margin:0 auto;height:44px!important}#login .lhead{background:#00694b;border-radius:14px;padding:18px;text-align:center;margin-bottom:16px}
+#login input[type=password]{font-size:20px;padding:12px;width:100%;letter-spacing:.15em}
+.shake{animation:shk .35s}@keyframes shk{20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
 .kbd{display:inline-block;min-width:1.45em;padding:0 .35em;margin-right:.55em;border-radius:5px;background:rgba(255,255,255,.28);font-size:.72em;font-weight:700;line-height:1.55;vertical-align:.12em;text-align:center}
 .btn.alt .kbd{background:rgba(255,255,255,.14)}
 .btn.hk-flash{outline:3px solid var(--acc2);outline-offset:2px}
@@ -100,7 +104,7 @@ header .badge{background:#ffcf5c;color:#3a2a00}
   <nav id="nav">
     <button data-t="home" class="on">Home</button><button id="moreBtn" onclick="toggleMore()">More ▾<span id="taskBadge"></span></button><span id="moreNav"><button data-t="dash">Dashboard</button><button data-t="blocks">Blocks</button><button data-t="batches">Batches</button><button data-t="inventory">Inventory</button><button data-t="planning">Planning</button><button data-t="tasks">Tasks</button><button data-t="prep">Prep</button><button data-t="labels">Labels</button><button data-t="settings">Settings</button></span>
   </nav>
-  <button id="opChip" class="chip" onclick="whoDialog()" title="Who is using this device"></button><button class="chip" onclick="activityDialog()">📋 Activity</button>
+  <button id="opChip" class="chip" onclick="userMenu()" title="Signed in as"></button><button class="chip" onclick="activityDialog()">📋 Activity</button>
   <input id="scanbox" placeholder="Scan or type a block ID…" autocomplete="off">
   <span id="addBtns" style="display:contents"><button class="btn alt" onclick="openNewCulture()">+ Add LC</button><button class="btn alt" onclick="openNewSpawn()">+ Add spawn</button><button class="btn" onclick="openNewBatch()">+ Add block batch</button></span>
 </header>
@@ -120,6 +124,7 @@ header .badge{background:#ffcf5c;color:#3a2a00}
 <dialog id="dlg"></dialog>
 <div id="toast"></div>
 <div id="printZone"></div>
+<div id="login" style="display:none"></div>
 <div id="keybar" style="display:none"></div><button id="keybarShow" class="chip" style="display:none" onclick="setKeybar(true)" title="Show the key guide">⌨ Keys</button>
 
 <script>
@@ -223,6 +228,9 @@ async function pullNow(){
 }
 function remoteRefresh(){const a=document.activeElement;if($('dlg').open||(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&a.id!=='scanbox')){SYNC.dirty=true;return}SYNC.dirty=false;render()}
 async function syncStart(){
+  try{await syncStart2()}finally{SYNC.ready=true;if(!curUser())loginShow()}
+}
+async function syncStart2(){
   if(!/^https?:$/.test(location.protocol))return setSync('local');
   try{SYNC.key=localStorage.getItem('fungatory-key')||'';const s=JSON.parse(localStorage.getItem('fungatory-sync')||'null');if(s){SYNC.ver=s.ver||0;SYNC.shadow=s.shadow||{}}}catch(e){}
   try{await api('GET',null,1e15)}catch(e){if(e.key)return setSync('key');if(e.status===404||e.status===405)return setSync('local');SYNC.on=true;setSync('offline');return syncLoop()}
@@ -231,7 +239,7 @@ async function syncStart(){
 let syncLoopOn=false;
 function syncLoop(){if(syncLoopOn)return;syncLoopOn=true;setInterval(pullNow,5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)pullNow()});window.addEventListener('online',pullNow)}
 function audit(msg){db.log.push({id:uid(),t:Date.now(),op:op(),room:ROLE||'',msg});if(db.log.length>3000)db.log.splice(0,db.log.length-3000)}
-const op=()=>db.settings.op||'';
+const op=()=>{const u=typeof curUser==='function'&&curUser();return u?u.name:''};
 const U=()=>db.settings.unit==='lb'?'lb':'g';
 function fmtW(g){if(g==null||isNaN(g))return '—';return db.settings.unit==='lb'?(g/453.592).toFixed(2)+' lb':(Math.abs(g)>=1000?(g/1000).toFixed(2)+' kg':Math.round(g)+' g')}
 const wIn=v=>db.settings.unit==='lb'?v*453.592:v;
@@ -282,10 +290,10 @@ const ROLES={
 var ROLE=null,QUICK=false,QUICK_SPAWN=true;try{ROLE=localStorage.getItem('fungatory-role');QUICK=localStorage.getItem('fungatory-quick')==='1';QUICK_SPAWN=localStorage.getItem('fungatory-quickspawn')!=='0'}catch(e){}
 if(ROLE&&!ROLES[ROLE])ROLE=null;
 const can=(...rs)=>!ROLE||ROLE==='all'||rs.includes(ROLE);
-function setRole(r){ROLE=r;try{localStorage.setItem('fungatory-role',r)}catch(e){}closeDlg();station.block=null;station.spawn=null;show('home')}
+function setRole(r){if(curUser()&&!roomsFor(curUser()).includes(r))return toast("You don't have access to that room");ROLE=r;try{localStorage.setItem('fungatory-role',r)}catch(e){}closeDlg();station.block=null;station.spawn=null;show('home')}
 function chooseRole(){dlg(roleChooser(true))}
 function roleChooser(inDlg){return `<h3 style="margin-top:0">Which room is this device in?</h3><p class="muted small" style="margin-top:0">This device will only show what that room needs. You can change it any time from the button at the top.</p>
-  <div class="act">${Object.entries(ROLES).map(([k,r])=>`<button class="btn xl ${k===ROLE?'green':'alt'}" style="text-align:left" onclick="setRole('${k}')">${r.icon} ${r.name}<div class="small" style="font-weight:400;opacity:.8">${r.desc}</div></button>`).join('')}
+  <div class="act">${Object.entries(ROLES).filter(([k])=>!curUser()||roomsFor(curUser()).includes(k)).map(([k,r])=>`<button class="btn xl ${k===ROLE?'green':'alt'}" style="text-align:left" onclick="setRole('${k}')">${r.icon} ${r.name}<div class="small" style="font-weight:400;opacity:.8">${r.desc}</div></button>`).join('')}
   ${inDlg?'<button class="btn alt" onclick="closeDlg()">Cancel</button>':''}</div>`}
 function setQuick(v){QUICK=v;try{localStorage.setItem('fungatory-quick',v?'1':'0')}catch(e){}renderHome()}
 let tab='home',mode={type:'lookup'},station={batch:null,block:null,decision:false,finishing:false,last:null},MS={},moreOpen=false;
@@ -293,27 +301,101 @@ function toggleMore(){moreOpen=!moreOpen;$('moreNav').classList.toggle('open',mo
 $('nav').onclick=e=>{const b=e.target.closest('button');if(b&&b.dataset.t)show(b.dataset.t)};
 function show(t){tab=t;if((t!=='home')!==moreOpen)toggleMore();
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===t));render()}
-function render(){MS={};genTasks();renderHeader();renderMode();({prep:renderPrep,home:renderHome,dash:renderDash,blocks:renderBlocks,batches:renderBatches,inventory:renderInventory,planning:renderPlanning,tasks:renderTasks,labels:renderLabels,settings:renderSettings})[tab]()}
+function render(){if(!curUser()&&SYNC.ready&&$('login')&&LG.step==='who')loginShow('who');MS={};genTasks();renderHeader();renderMode();({prep:renderPrep,home:renderHome,dash:renderDash,blocks:renderBlocks,batches:renderBatches,inventory:renderInventory,planning:renderPlanning,tasks:renderTasks,labels:renderLabels,settings:renderSettings})[tab]()}
 function renderHeader(){
   const r=ROLES[ROLE],full=!ROLE||ROLE==='all';$('roleChip').style.display=ROLE?'':'none';$('roleChip').innerHTML=r?`${r.icon} ${r.name} ▾`:'';
   $('addBtns').style.display=full||ROLE==='lab'?'contents':'none';$('moreBtn').style.display=full?'':'none';
   document.querySelector('nav [data-t="home"]').style.display=full?'':'none';
   const pc=$('printerChip');pc.style.display=can('lab')&&ROLE?'':'none';pc.innerHTML=PRINTER==='bt'?(PH.ch&&PH.dev&&PH.dev.gatt.connected?'🖨 '+esc(PH.dev.name||'Printer')+' ✓':'🖨 Printer — tap to connect'):'🖨 Printer';if(!full&&moreOpen)toggleMore();
-  $('opChip').innerHTML=op()?'👤 '+esc(op()):'👤 Who are you?';
+  const u=curUser();$('opChip').innerHTML=u?`👤 ${esc(u.name)}${u.admin?' · admin':''} ▾`:'👤 Sign in';
   const due=db.tasks.filter(t=>t.status==='open'&&t.due<=today0()+DAY-1).length;$('taskBadge').innerHTML=due?`<span class="badge">${due}</span>`:'';
 }
-function whoDialog(){
-  const ops=db.settings.operators;
-  dlg(`<h3 style="margin-top:0">Who's using this device?</h3><p class="small muted" style="margin-top:0">Everything done here is saved in the activity log under this name. Each device remembers its own person.</p>
-  <div class="act">${ops.map((o,i)=>`<div class="row" style="margin:0;flex-wrap:nowrap"><button class="btn xl ${o===op()?'green':'alt'}" style="flex:1" onclick="setOp(${i})">👤 ${esc(o)}</button>${can()?`<button class="chip" title="Remove" onclick="removeOp(${i})">✕</button>`:''}</div>`).join('')}</div>
-  <div class="row"><input id="newOp" placeholder="Add a person (e.g. Maria)" style="flex:1" onkeydown="if(event.key==='Enter')addOp()"><button class="btn" onclick="addOp()">Add</button></div>
-  <div class="row"><button class="btn alt" onclick="closeDlg()">Close</button></div>`);
+/* ================= people, passwords & access =================
+   Each person has a password and a list of rooms they may use. Admins can use every room (including Office)
+   and manage people. Passwords are stored only as salted SHA-256 hashes. The browser asks who you are every
+   time the app is opened in a new tab or window. */
+const ALL_ROOMS=['prep','lab','grow','harvest','all'];
+function people(){
+  if(!Array.isArray(db.settings.people)){const ops=(db.settings.operators&&db.settings.operators.length?db.settings.operators:['Trace']);
+    db.settings.people=ops.map((n,i)=>({id:uid(),name:n,admin:i===0,rooms:i===0?ALL_ROOMS.slice():['lab','grow','harvest'],hash:'',salt:''}))}
+  return db.settings.people}
+const roomsFor=p=>p?(p.admin?ALL_ROOMS.slice():(p.rooms||[]).filter(r=>ALL_ROOMS.includes(r))):[];
+let SESSION={pid:null};try{SESSION.pid=sessionStorage.getItem('fungatory-user')}catch(e){}
+function curUser(){return SESSION.pid?people().find(p=>p.id===SESSION.pid&&!p.removed)||null:null}
+async function hashPw(pw,salt){const data=new TextEncoder().encode(salt+':'+pw);
+  if(crypto&&crypto.subtle){const h=await crypto.subtle.digest('SHA-256',data);return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join('')}
+  let h=5381;for(const b of data)h=((h<<5)+h+b)>>>0;return 'x'+h.toString(16)}
+const newSalt=()=>[...crypto.getRandomValues(new Uint8Array(12))].map(b=>b.toString(16).padStart(2,'0')).join('');
+async function setPassword(p,pw){p.salt=newSalt();p.hash=await hashPw(pw,p.salt)}
+function syncOps(){db.settings.operators=people().filter(p=>!p.removed).map(p=>p.name)}
+
+let LG={step:'who',pid:null};
+function loginShow(step,pid){
+  const el=$('login');if(!el)return;LG.step=step||'who';if(pid!==undefined)LG.pid=pid;
+  if(location.protocol.startsWith('http')&&!SYNC.ready){el.style.display='';el.innerHTML=`<div class="lbox"><div class="lhead">${$('opChip')?document.querySelector('header h1').innerHTML:''}</div><div class="card" style="text-align:center">Loading…</div></div>`;return}
+  const ps=people().filter(p=>!p.removed),p=ps.find(x=>x.id===LG.pid),logo=document.querySelector('header h1 img')?document.querySelector('header h1 img').outerHTML:'<b>The Fungatory</b>';
+  let body='';
+  if(LG.step==='who')body=`<h3 style="margin-top:0">Who's using this device?</h3><div class="act">${ps.map(x=>`<button class="btn xl alt" style="text-align:left" onclick="loginShow('pw','${x.id}')">👤 ${esc(x.name)}<div class="small" style="font-weight:400;opacity:.75">${x.admin?'Admin — every room':roomsFor(x).map(r=>ROLES[r]?ROLES[r].name:r).join(', ')||'No rooms yet'}</div></button>`).join('')}</div>`;
+  else if(LG.step==='pw'&&p){const setNew=!p.hash;
+    body=`<h3 style="margin-top:0">${setNew?`Hi ${esc(p.name)} — create your password`:`Hi ${esc(p.name)}`}</h3>
+     ${setNew?`<p class="small muted">You don't have a password yet. Pick one you'll remember — at least 4 characters.</p>`:''}
+     <label>${setNew?'New password':'Password'}<input id="lg_pw" type="password" autocomplete="${setNew?'new-password':'current-password'}" onkeydown="if(event.key==='Enter')${setNew?"$('lg_pw2').focus()":'loginSubmit()'}"></label>
+     ${setNew?`<label>Type it again<input id="lg_pw2" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')loginSubmit()"></label>`:''}
+     <div class="act"><button class="btn xl green" onclick="loginSubmit()">${setNew?'Save password & continue':'Sign in'}</button><button class="btn alt" onclick="loginShow('who')">← Not ${esc(p.name)}</button></div>
+     ${!setNew?`<p class="small muted" style="margin-top:14px">Forgot it? An admin can reset it from 👤 → Manage people.</p>`:''}`}
+  else if(LG.step==='room'&&p){const rs=roomsFor(p);
+    body=`<h3 style="margin-top:0">Where is this device?</h3><p class="small muted" style="margin-top:0">Signed in as <b>${esc(p.name)}</b>. The app only shows what this room needs.</p>
+     <div class="act">${rs.map(k=>`<button class="btn xl ${k===ROLE?'green':'alt'}" style="text-align:left" onclick="loginRoom('${k}')">${ROLES[k].icon} ${ROLES[k].name}<div class="small" style="font-weight:400;opacity:.8">${ROLES[k].desc}</div></button>`).join('')||'<div class="alert">No rooms assigned yet — ask an admin to give you access.</div>'}
+     <button class="btn alt" onclick="logout()">← Sign out</button></div>`}
+  el.innerHTML=`<div class="lbox"><div class="lhead">${logo}</div><div class="card">${body}</div></div>`;el.style.display='';
+  setTimeout(()=>{const f=$('lg_pw');if(f)f.focus();markHotkeys()},0);
 }
-function setOp(i){const o=db.settings.operators[i];if(!o)return;db.settings.op=o;save();closeDlg();renderHeader();toast('Now logging as '+o)}
-function addOp(){const v=$('newOp').value.trim();if(!v)return;if(db.settings.operators.some(o=>o.toLowerCase()===v.toLowerCase()))return toast(v+' is already on the list');
-  db.settings.operators.push(v);db.settings.op=v;audit('Added person '+v);save();closeDlg();renderHeader();toast('Now logging as '+v)}
-function removeOp(i){const o=db.settings.operators[i];if(!confirm(`Remove ${o} from the list? Their past activity stays in the log.`))return;
-  db.settings.operators.splice(i,1);if(db.settings.op===o)db.settings.op=db.settings.operators[0]||'';save();whoDialog();renderHeader()}
+async function loginSubmit(){
+  const p=people().find(x=>x.id===LG.pid);if(!p)return loginShow('who');const pw=$('lg_pw').value;
+  if(!p.hash){if(pw.length<4)return toast('Use at least 4 characters');if(pw!==$('lg_pw2').value)return toast("Passwords don't match");
+    if(!SYNC.ready)return toast('Still loading — try again in a second');await setPassword(p,pw);syncOps();save()}
+  else if(await hashPw(pw,p.salt)!==p.hash){const b=document.querySelector('#login .card');b.classList.remove('shake');void b.offsetWidth;b.classList.add('shake');$('lg_pw').value='';$('lg_pw').focus();return toast('Wrong password')}
+  SESSION.pid=p.id;try{sessionStorage.setItem('fungatory-user',p.id)}catch(e){}
+  const rs=roomsFor(p);if(rs.length===1)return loginRoom(rs[0]);loginShow('room');
+}
+function loginRoom(k){const p=curUser();if(!p||!roomsFor(p).includes(k))return;ROLE=k;try{localStorage.setItem('fungatory-role',k)}catch(e){}
+  $('login').style.display='none';$('login').innerHTML='';audit(`Signed in — ${ROLES[k].name}`);save();station.block=null;station.spawn=null;station.culture=null;show('home');toast(`Hi ${p.name} — ${ROLES[k].name}`)}
+function logout(){if(curUser())audit('Signed out');SESSION.pid=null;try{sessionStorage.removeItem('fungatory-user')}catch(e){}closeDlg();save();loginShow('who')}
+function userMenu(){const u=curUser();if(!u)return loginShow('who');
+  dlg(`<h3 style="margin-top:0">👤 ${esc(u.name)}${u.admin?' <span class="tag m">Admin</span>':''}</h3>
+  <div class="act">${roomsFor(u).length>1?'<button class="btn xl alt" onclick="chooseRole()">Change room</button>':''}
+   <button class="btn xl alt" onclick="changeMyPw()">Change my password</button>
+   ${u.admin?'<button class="btn xl alt" onclick="managePeople()">Manage people & access</button>':''}
+   <button class="btn xl danger" onclick="logout()">Switch user / sign out</button><button class="btn alt" onclick="closeDlg()">Close</button></div>`)}
+function changeMyPw(){const u=curUser();dlg(`<h3 style="margin-top:0">Change my password</h3><label>Current password<input id="cp_old" type="password"></label><label>New password<input id="cp_new" type="password"></label><label>Type it again<input id="cp_new2" type="password"></label>
+  <div class="act"><button class="btn xl green" onclick="doChangePw()">Save</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`)}
+async function doChangePw(){const u=curUser();if(u.hash&&await hashPw($('cp_old').value,u.salt)!==u.hash)return toast('Current password is wrong');
+  const n=$('cp_new').value;if(n.length<4)return toast('Use at least 4 characters');if(n!==$('cp_new2').value)return toast("Passwords don't match");
+  await setPassword(u,n);audit('Changed own password');save();closeDlg();toast('Password changed')}
+function managePeople(){if(!curUser()||!curUser().admin)return toast('Admins only');
+  const ps=people().filter(p=>!p.removed),rl=ALL_ROOMS.map(k=>[k,ROLES[k].icon+' '+(k==='all'?'Office':ROLES[k].name.split(' ')[0])]);
+  dlg(`<h3 style="margin-top:0">People & access</h3><p class="small muted" style="margin-top:0">Tick the rooms each person may use. Admins get every room and can manage people.</p>
+  <div class="scroll"><table><tr><th>Person</th>${rl.map(([,n])=>`<th style="text-align:center">${n}</th>`).join('')}<th style="text-align:center">Admin</th><th>Password</th><th></th></tr>
+  ${ps.map(p=>`<tr><td><b>${esc(p.name)}</b>${p.id===SESSION.pid?' <span class="small muted">(you)</span>':''}</td>
+    ${ALL_ROOMS.map(k=>`<td style="text-align:center"><input type="checkbox" style="width:auto" ${p.admin||roomsFor(p).includes(k)?'checked':''} ${p.admin?'disabled':''} onchange="setRoomAccess('${p.id}','${k}',this.checked)"></td>`).join('')}
+    <td style="text-align:center"><input type="checkbox" style="width:auto" ${p.admin?'checked':''} onchange="setAdmin('${p.id}',this.checked)"></td>
+    <td><button class="chip" onclick="resetPw('${p.id}')">${p.hash?'Reset':'Set'}</button></td><td>${p.id!==SESSION.pid?`<button class="chip" title="Remove" onclick="removePerson('${p.id}')">✕</button>`:''}</td></tr>`).join('')}</table></div>
+  <h4>Add a person</h4><div class="row" style="margin-top:0"><input id="np_name" placeholder="Name" style="flex:1;min-width:140px"><input id="np_pw" type="password" placeholder="Password (they can change it)" style="flex:1;min-width:180px"></div>
+  <div class="row">${rl.map(([k,n])=>`<label style="display:inline-flex;gap:5px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" class="np_room" value="${k}" style="width:auto" ${['lab','grow','harvest'].includes(k)?'checked':''}> ${n}</label>`).join('')}
+   <label style="display:inline-flex;gap:5px;align-items:center;margin:0;color:var(--ink)"><input type="checkbox" id="np_admin" style="width:auto"> Admin</label></div>
+  <div class="act" style="margin-top:10px"><button class="btn xl green" onclick="addPerson()">Add person</button><button class="btn alt" onclick="closeDlg()">Done</button></div>`)}
+async function addPerson(){const n=$('np_name').value.trim(),pw=$('np_pw').value;if(!n)return toast('Enter a name');
+  if(people().some(p=>!p.removed&&p.name.toLowerCase()===n.toLowerCase()))return toast(n+' is already on the list');if(pw&&pw.length<4)return toast('Password needs at least 4 characters');
+  const p={id:uid(),name:n,admin:$('np_admin').checked,rooms:[...document.querySelectorAll('.np_room:checked')].map(x=>x.value),hash:'',salt:''};if(pw)await setPassword(p,pw);
+  people().push(p);syncOps();audit(`Added person ${n}${p.admin?' (admin)':''}`);save();managePeople();toast(pw?`${n} added`:`${n} added — they'll create a password the first time they sign in`)}
+function setRoomAccess(id,k,on){const p=people().find(x=>x.id===id);if(!p)return;p.rooms=(p.rooms||[]).filter(r=>r!==k);if(on)p.rooms.push(k);audit(`${on?'Gave':'Removed'} ${p.name} access to ${ROLES[k].name}`);save()}
+function setAdmin(id,on){const p=people().find(x=>x.id===id);if(!p)return;if(!on&&people().filter(x=>x.admin&&!x.removed).length<=1){toast('There must be at least one admin');return managePeople()}
+  p.admin=on;if(!on&&!(p.rooms||[]).length)p.rooms=['lab','grow','harvest'];audit(`${p.name} ${on?'is now an admin':'is no longer an admin'}`);save();managePeople();renderHeader()}
+async function resetPw(id){const p=people().find(x=>x.id===id);const v=prompt(`New password for ${p.name} (at least 4 characters). Leave empty to let them create one at their next sign-in.`);if(v===null)return;
+  if(v&&v.length<4)return toast('Use at least 4 characters');if(v)await setPassword(p,v);else{p.hash='';p.salt=''}audit(`Reset password for ${p.name}`);save();managePeople();toast('Password updated')}
+function removePerson(id){const p=people().find(x=>x.id===id);if(!p)return;if(p.admin&&people().filter(x=>x.admin&&!x.removed).length<=1)return toast('There must be at least one admin');
+  if(!confirm(`Remove ${p.name}? They won't be able to sign in. Their past activity stays in the log.`))return;p.removed=true;syncOps();audit(`Removed person ${p.name}`);save();managePeople()}
+function whoDialog(){userMenu()}
 let actFilter='',actDay='all';
 function activityDialog(){
   const people=[...new Set([...db.settings.operators,...db.log.map(l=>l.op).filter(Boolean)])],since=actDay==='today'?today0():actDay==='week'?Date.now()-7*DAY:0;
@@ -342,6 +424,7 @@ document.addEventListener('keydown',e=>{
 });
 $('scanbox').addEventListener('keydown',e=>{if(e.key==='Enter'){const v=e.target.value;e.target.value='';if(v.trim())handleScan(v)}});
 function handleScan(raw){
+  if(!curUser()){toast('Sign in first');return}
   const code=raw.trim();
   if(/^ACT:/i.test(code)){
     const p=code.split(':'),a=(p[1]||'').toUpperCase(),arg=p.slice(2).join(':');beep(520);
@@ -539,6 +622,7 @@ function renderHome(){
   if(mode.type!=='stage'&&mode.type!=='loc')mode={type:station.block?'harvest':'lookup'};station.batch=null;
   if(station.block&&!db.blocks[station.block])station.block=null;if(station.batch&&!db.batches[station.batch])station.batch=null;
   const b=db.blocks[station.block],sb=!b&&db.spawnBags[station.spawn],cj=!b&&!sb&&db.cultureJars[station.culture];
+  if(!ROLE&&curUser()){loginShow('room',curUser().id);return}
   if(!ROLE){$('home').innerHTML=`<div class="card" style="max-width:560px;margin:16px auto">${roleChooser(false)}</div>`;return}
   if(ROLE==='prep'&&!station.block&&!station.spawn&&!station.culture){$('home').innerHTML=prepView();drawPrepChart();return}
   const showScale=can('harvest')&&ROLE!=='lab';
@@ -1454,7 +1538,7 @@ async function probeCheck(test){
 }
 function renderSettings(){setTimeout(()=>probeCheck(false),0);
   $('settings').innerHTML=`<div class="card"><b>Operators &amp; locations</b><div class="two">
-   <label>Operators (comma separated)<input value="${esc(db.settings.operators.join(', '))}" onchange="db.settings.operators=this.value.split(',').map(s=>s.trim()).filter(Boolean);if(!db.settings.operators.includes(db.settings.op))db.settings.op=db.settings.operators[0]||'';save();render()"></label>
+   <div><b class="small">People</b><div class="small muted" style="margin:4px 0">${people().filter(p=>!p.removed).map(p=>esc(p.name)+(p.admin?' (admin)':'')).join(', ')}</div><button class="btn alt" onclick="managePeople()">Manage people & access</button></div>
    <label>Rooms (comma separated)<input value="${esc(db.settings.rooms.join(', '))}" onchange="db.settings.rooms=this.value.split(',').map(s=>s.trim()).filter(Boolean);save()"></label></div></div>
   <div class="card"><b>Weighing</b><p class="small muted">${hidDev?`Connected scale: <b>${esc(hidDev.productName||'USB scale')}</b> — vendor ID <code>${hidDev.vendorId}</code>, product ID <code>${hidDev.productId}</code> (needed for no-click auto-connect)`:'No scale connected.'}</p><div class="two">
    <label>Display units<select onchange="db.settings.unit=this.value;save()"><option value="lb" ${db.settings.unit==='lb'?'selected':''}>pounds</option><option value="g" ${db.settings.unit==='g'?'selected':''}>grams / kg</option></select></label>
@@ -1493,7 +1577,7 @@ function importSensors(f){if(!f)return;f.text().then(t=>{const lines=t.trim().sp
    Number keys press the numbered big buttons on screen. Letters open common actions.
    The barcode scanner also "types", very fast — key bursts are ignored so scans never trigger shortcuts. */
 let hkTimer=null,hkLast=0,hkBurst=0;
-function hkScope(){return $('dlg').open?$('dlg'):document.querySelector('section.on')}
+function hkScope(){return $('dlg').open?$('dlg'):$('login')&&$('login').style.display!=='none'?$('login'):document.querySelector('section.on')}
 function hkButtons(){const sc=hkScope();return sc?[...sc.querySelectorAll('.btn.xl')].filter(b=>b.offsetParent!==null&&!b.disabled&&!b.dataset.space).slice(0,9):[]}
 function hkSpace(){const sc=hkScope();return sc?[...sc.querySelectorAll('[data-space]')].find(b=>b.offsetParent!==null&&!b.disabled):null}
 let KEYBAR=true;try{KEYBAR=localStorage.getItem('fungatory-keybar')!=='0'}catch(e){}
@@ -1529,6 +1613,7 @@ function hkHelp(){dlg(`<h3 style="margin-top:0">⌨ Keyboard shortcuts</h3><tabl
   <p class="small muted">Shortcuts don't fire while you're typing in a box, and scanner input is never mistaken for a shortcut.</p><div class="row"><button class="btn alt" onclick="closeDlg()">Close</button></div>`)}
 function goHome(){station.block=null;station.spawn=null;station.culture=null;station.decision=false;station.finishing=false;show('home')}
 function runHotkey(k){
+  if($('login').style.display!=='none'){if(/^[1-9]$/.test(k)){const b=hkButtons()[+k-1];if(b)hkPress(b)}return}
   if(k===' '){const b=hkSpace();if(b)hkPress(b);return}
   if(/^[1-9]$/.test(k)){const b=hkButtons()[+k-1];if(b)hkPress(b);return}
   if($('dlg').open)return;const K=k.toLowerCase();
@@ -1554,13 +1639,13 @@ document.addEventListener('keydown',e=>{
     return}
   if(now-hkLast<80)hkBurst=now+250;hkLast=now;
   if(now<hkBurst){clearTimeout(hkTimer);hkTimer=null;return}
-  if(e.key==='Escape'){if(!$('dlg').open&&tab==='home')goHome();return}
+  if(e.key==='Escape'){if($('login').style.display!=='none'){if(LG.step!=='who'&&LG.step!=='room')loginShow('who');return}if(!$('dlg').open&&tab==='home')goHome();return}
   if(e.key===' '&&hkSpace())e.preventDefault();
   if(e.key.length!==1)return;
   const k=e.key;clearTimeout(hkTimer);hkTimer=setTimeout(()=>{hkTimer=null;if(performance.now()<hkBurst)return;runHotkey(k)},90);
 },true);
 
-seedStrains();render();syncStart();
+people();syncOps();seedStrains();render();if(!curUser())loginShow();syncStart();
 </script>
 </body>
 </html>
