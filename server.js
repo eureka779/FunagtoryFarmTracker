@@ -118,7 +118,9 @@ function scaleDoc(d, qty, size) {
   const body = String(d.body || '').replace(/\{\{\s*([^}]+?)\s*\}\}/g, (m, k) => {
     if (/^(qty|quantity|count)$/i.test(k)) return String(qty); if (/^unit$/i.test(k)) return plural;
     if (/^size$/i.test(k) && sized) return fmtAmt(size, c.sizeUnit); if (/^total$/i.test(k) && sized) return fmtAmt(total, c.sizeUnit);
-    const it = items.find(i => i.name.toLowerCase() === k.toLowerCase()); return it ? it.text : m; });
+    const it = items.find(i => i.name.toLowerCase() === k.toLowerCase()); if (it) return it.text;
+    const per = k.match(/^(.+?)\s+(each|per\s+\S+)$/i), raw = per && (c.items || []).find(i => i.name && i.name.toLowerCase() === per[1].toLowerCase());
+    return raw ? fmtAmt((+raw.amount || 0) * f / qty, raw.unit) : m; });
   return { qty, unit: plural, items, body, size: sized ? fmtAmt(size, c.sizeUnit) : undefined, total: sized ? fmtAmt(total, c.sizeUnit) : undefined };
 }
 const activeShares = () => docs.shares.filter(x => x.until > Date.now());
