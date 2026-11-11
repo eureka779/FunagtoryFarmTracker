@@ -65,6 +65,12 @@ dialog::backdrop{background:#0006}
 .label{border:1px dashed var(--line);border-radius:6px;display:flex;gap:2mm;align-items:center;background:#fff;color:#000;overflow:hidden}
 .label .qr{flex:none}.label b{font-size:14px;display:block;line-height:1.1}.label small{font-size:10px;display:block;line-height:1.2}
 #printZone{display:none}
+.tboard{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:start}@media (max-width:860px){.tboard{grid-template-columns:1fr}}
+.tcol{background:var(--card);border:1px solid var(--line);border-top:4px solid var(--line);border-radius:12px;padding:10px}
+.tcol.urgent{border-top-color:#e0705c}.tcol.important{border-top-color:#e8a23a}.tcol.todo{border-top-color:#4cc38a}
+.tcol h3{margin:2px 2px 2px;font-size:16px}.tcol .sub{font-size:12px;color:var(--muted);margin:0 2px 8px}
+.tcard{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:9px 10px;margin:8px 0}
+.tcard .tt{font-weight:600;cursor:pointer}.tcard .acts{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
 #login{position:fixed;inset:0;z-index:40;background:var(--bg);overflow:auto;padding:24px 16px 80px}
 #login .lbox{max-width:520px;margin:0 auto}#login .lhead img{margin:0 auto;height:44px!important}#login .lhead{background:#00694b;border-radius:14px;padding:18px;text-align:center;margin-bottom:16px}
 #login input[type=password]{font-size:20px;padding:12px;width:100%;letter-spacing:.15em}
@@ -104,7 +110,7 @@ header .badge{background:#ffcf5c;color:#3a2a00}
   <nav id="nav">
     <button data-t="home" class="on">Home</button><button id="moreBtn" onclick="toggleMore()">More ▾<span id="taskBadge"></span></button><span id="moreNav"><button data-t="dash">Dashboard</button><button data-t="blocks">Blocks</button><button data-t="batches">Batches</button><button data-t="inventory">Inventory</button><button data-t="planning">Planning</button><button data-t="tasks">Tasks</button><button data-t="prep">Prep</button><button data-t="labels">Labels</button><button data-t="settings">Settings</button></span>
   </nav>
-  <button id="opChip" class="chip" onclick="userMenu()" title="Signed in as"></button><button class="chip" onclick="activityDialog()">📋 Activity</button>
+  <button id="opChip" class="chip" onclick="userMenu()" title="Signed in as"></button><button class="chip" onclick="activityDialog()">📋 Activity</button><button id="taskChip" class="chip" onclick="openTaskBoard()">✅ Tasks</button>
   <input id="scanbox" placeholder="Scan or type a block ID…" autocomplete="off">
   <span id="addBtns" style="display:contents"><button class="btn alt" onclick="openNewCulture()">+ Add LC</button><button class="btn alt" onclick="openNewSpawn()">+ Add spawn</button><button class="btn" onclick="openNewBatch()">+ Add block batch</button></span>
 </header>
@@ -294,7 +300,7 @@ function setRole(r){if(curUser()&&!roomsFor(curUser()).includes(r))return toast(
 function chooseRole(){dlg(roleChooser(true))}
 function roleChooser(inDlg){return `<h3 style="margin-top:0">Which room is this device in?</h3><p class="muted small" style="margin-top:0">This device will only show what that room needs. You can change it any time from the button at the top.</p>
   <div class="act">${Object.entries(ROLES).filter(([k])=>!curUser()||roomsFor(curUser()).includes(k)).map(([k,r])=>`<button class="btn xl ${k===ROLE?'green':'alt'}" style="text-align:left" onclick="setRole('${k}')">${r.icon} ${r.name}<div class="small" style="font-weight:400;opacity:.8">${r.desc}</div></button>`).join('')}
-  ${inDlg?'<button class="btn alt" onclick="closeDlg()">Cancel</button>':''}</div>`}
+  <button class="btn alt" onclick="openTaskBoard()">✅ Task board</button>${inDlg?'<button class="btn alt" onclick="closeDlg()">Cancel</button>':''}</div>`}
 function setQuick(v){QUICK=v;try{localStorage.setItem('fungatory-quick',v?'1':'0')}catch(e){}renderHome()}
 let tab='home',mode={type:'lookup'},station={batch:null,block:null,decision:false,finishing:false,last:null},MS={},moreOpen=false;
 function toggleMore(){moreOpen=!moreOpen;$('moreNav').classList.toggle('open',moreOpen)}
@@ -303,12 +309,13 @@ function show(t){tab=t;if((t!=='home')!==moreOpen)toggleMore();
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===t));render()}
 function render(){if(!curUser()&&SYNC.ready&&$('login')&&LG.step==='who')loginShow('who');MS={};genTasks();renderHeader();renderMode();({prep:renderPrep,home:renderHome,dash:renderDash,blocks:renderBlocks,batches:renderBatches,inventory:renderInventory,planning:renderPlanning,tasks:renderTasks,labels:renderLabels,settings:renderSettings})[tab]()}
 function renderHeader(){
-  const r=ROLES[ROLE],full=!ROLE||ROLE==='all';$('roleChip').style.display=ROLE?'':'none';$('roleChip').innerHTML=r?`${r.icon} ${r.name} ▾`:'';
+  const r=ROLES[ROLE],full=!ROLE||ROLE==='all';$('roleChip').style.display=ROLE||curUser()?'':'none';$('roleChip').innerHTML=r?`${r.icon} ${r.name} ▾`:'📍 Choose room ▾';
   $('addBtns').style.display=full||ROLE==='lab'?'contents':'none';$('moreBtn').style.display=full?'':'none';
   document.querySelector('nav [data-t="home"]').style.display=full?'':'none';
   const pc=$('printerChip');pc.style.display=can('lab')&&ROLE?'':'none';pc.innerHTML=PRINTER==='bt'?(PH.ch&&PH.dev&&PH.dev.gatt.connected?'🖨 '+esc(PH.dev.name||'Printer')+' ✓':'🖨 Printer — tap to connect'):'🖨 Printer';if(!full&&moreOpen)toggleMore();
   const u=curUser();$('opChip').innerHTML=u?`👤 ${esc(u.name)}${u.admin?' · admin':''} ▾`:'👤 Sign in';
-  const due=db.tasks.filter(t=>t.status==='open'&&t.due<=today0()+DAY-1).length;$('taskBadge').innerHTML=due?`<span class="badge">${due}</span>`:'';
+  const nu=db.tasks.filter(t=>t.status==='open'&&tierOf(t,true)==='urgent').length;$('taskBadge').innerHTML='';
+  $('taskChip').innerHTML=`✅ Tasks${nu?` <span class="badge">${nu}</span>`:''}`;$('taskChip').style.display=curUser()?'':'none';
 }
 /* ================= people, passwords & access =================
    Each person has a password and a list of rooms they may use. Admins can use every room (including Office)
@@ -346,7 +353,7 @@ function loginShow(step,pid){
   else if(LG.step==='room'&&p){const rs=roomsFor(p);
     body=`<h3 style="margin-top:0">Where is this device?</h3><p class="small muted" style="margin-top:0">Signed in as <b>${esc(p.name)}</b>. The app only shows what this room needs.</p>
      <div class="act">${rs.map(k=>`<button class="btn xl ${k===ROLE?'green':'alt'}" style="text-align:left" onclick="loginRoom('${k}')">${ROLES[k].icon} ${ROLES[k].name}<div class="small" style="font-weight:400;opacity:.8">${ROLES[k].desc}</div></button>`).join('')||'<div class="alert">No rooms assigned yet — ask an admin to give you access.</div>'}
-     <button class="btn alt" onclick="logout()">← Sign out</button></div>`}
+     <button class="btn alt" onclick="openTaskBoard()">✅ Task board</button><button class="btn alt" onclick="logout()">← Sign out</button></div>`}
   el.innerHTML=`<div class="lbox"><div class="lhead">${logo}</div><div class="card">${body}</div></div>`;el.style.display='';
   setTimeout(()=>{const f=$('lg_pw');if(f)f.focus();markHotkeys()},0);
 }
@@ -1160,25 +1167,66 @@ function genTasks(){
   Object.values(db.batches).forEach(bt=>{const bl=batchBlocks(bt.id).filter(b=>b.stage==='Inoculated'||b.stage==='Incubating');if(!bl.length)return;
     const ready=pdate(bt.inocDate)+param(bt.species,'incub').v*DAY;if(ready<=t0+2*DAY)want[`fruit|${bt.id}`]={title:`Move batch ${bt.id} (${bl.length} ${bt.species}) into fruiting`,due:ready,qty:bl.length+' blocks',pri:'high'}});
   Object.entries(want).forEach(([key,w])=>{const ex=db.tasks.find(t=>t.key===key);
-    if(!ex)db.tasks.push({id:'a'+hashStr(key),key,auto:true,title:w.title,due:Math.max(w.due,0),qty:w.qty,pri:w.pri,assignee:'',status:'open',created:Date.now(),planDue:w.due,hist:[]});
-    else if(ex.auto){ex.title=w.title;ex.qty=w.qty;ex.planDue=w.due;if(!ex.resched&&ex.status==='open')ex.due=w.due;if(ex.status==='cancelled'&&ex.autoCancel){ex.status='open';ex.autoCancel=false}}});
+    if(!ex)db.tasks.push({id:'a'+hashStr(key),key,auto:true,title:w.title,due:Math.max(w.due,0),qty:w.qty,pri:w.pri==='high'?'important':'todo',room:/Inoculate|substrate/i.test(w.title)?'lab':/fruiting/i.test(w.title)?'grow':/culture|spawn/i.test(w.title)?'lab':'',assignee:'',status:'open',created:Date.now(),planDue:w.due,hist:[]});
+    else if(ex.auto&&!ex.custom){ex.title=w.title;ex.qty=w.qty;ex.planDue=w.due;if(!ex.resched&&ex.status==='open')ex.due=w.due;if(ex.status==='cancelled'&&ex.autoCancel){ex.status='open';ex.autoCancel=false}}});
   db.tasks.forEach(t=>{if(t.auto&&t.status==='open'&&!want[t.key]){t.status='cancelled';t.autoCancel=true;t.hist.push({t:Date.now(),msg:'No longer needed after re-forecast'})}});
 }
-let taskView='open';
-function renderTasks(){
-  const t0=today0(),list=db.tasks.filter(t=>taskView==='all'||t.status===taskView).sort((a,c)=>a.due-c.due);
-  $('tasks').innerHTML=`<div class="row"><span class="chips">${['open','done','cancelled','all'].map(v=>`<button class="chip ${taskView===v?'on':''}" onclick="taskView='${v}';renderTasks()">${v[0].toUpperCase()+v.slice(1)}</button>`).join('')}</span></div>
-  <div class="card scroll"><table><tr><th>Due</th><th>Task</th><th>Qty</th><th>Priority</th><th>Assigned</th><th></th></tr>
-  ${list.map(t=>{const od=t.status==='open'&&t.due<t0;return `<tr><td class="${od?'bad':''}">${fmtDay(t.due)}${od?' overdue':''}${t.resched?' <span class="tag">rescheduled</span>':''}</td><td>${esc(t.title)}${t.auto?' <span class="tag">from plan</span>':''}${t.hist.length?`<div class="small muted">${esc(t.hist[t.hist.length-1].msg)}</div>`:''}</td><td>${esc(t.qty)}</td><td>${t.pri==='high'?'<span class="tag m">High</span>':'Normal'}</td>
-   <td><select onchange="taskSet('${t.id}','assignee',this.value)"><option value="">—</option>${db.settings.operators.map(o=>`<option ${t.assignee===o?'selected':''}>${esc(o)}</option>`).join('')}</select></td>
-   <td style="white-space:nowrap">${t.status==='open'?`<button class="chip" onclick="taskSet('${t.id}','status','done')">✓ Done</button> <button class="chip" onclick="postpone('${t.id}',1)">+1 day</button> <input type="date" value="${dstr(t.due)}" onchange="resched('${t.id}',this.value)" style="width:135px"> <button class="chip" onclick="taskSet('${t.id}','status','cancelled')">✕</button>`:`<button class="chip" onclick="taskSet('${t.id}','status','open')">Reopen</button>`}</td></tr>`}).join('')||'<tr><td colspan="6" class="muted">No tasks.</td></tr>'}</table></div>
-  <div class="card"><b>Add a task</b><div class="row"><input id="tk_t" placeholder="Task" style="flex:1;min-width:200px"><input id="tk_d" type="date" value="${dstr(Date.now())}"><input id="tk_q" placeholder="Qty" style="width:90px"><select id="tk_p"><option value="normal">Normal</option><option value="high">High</option></select><button class="btn" onclick="addTask()">Add</button></div>
-  <p class="small muted">Planned tasks are recalculated whenever orders, harvests, closures or inventory change. Rescheduled tasks keep your date.</p></div>`;
+/* ================= task board =================
+   Three lists: Do now (important + urgent), Important (schedule it), To do (when there's time).
+   Overdue tasks always show under Do now. Planning creates tasks automatically; anyone can add their own. */
+const TIERS=[['urgent','🔴 Do now','Important and needs doing right away'],['important','🟠 Important','Matters, but can be scheduled'],['todo','🟢 To do','Needs doing — not urgent or critical']];
+function tierOf(t,eff){const base=t.pri==='urgent'?'urgent':(t.pri==='important'||t.pri==='high')?'important':'todo';return eff&&t.status==='open'&&t.due&&t.due<today0()?'urgent':base}
+let taskF={who:'all',room:''};
+function openTaskBoard(){const u=curUser();if(!u)return;if(ROLE&&!roomsFor(u).includes(ROLE))ROLE=null;$('login').style.display='none';closeDlg();show('tasks')}
+function taskCard(t){
+  const t0=today0(),od=t.due&&t.due<t0,dt=t.due&&t.due>=t0&&t.due<t0+DAY,eff=tierOf(t,true),base=tierOf(t),i=TIERS.findIndex(x=>x[0]===base);
+  return `<div class="tcard"><div class="row" style="margin:0;justify-content:space-between;align-items:flex-start;flex-wrap:nowrap"><span class="tt" onclick="editTask('${t.id}')">${esc(t.title)}</span>
+   ${t.due?`<span class="tag" style="${od?'background:var(--warn);color:#fff':dt?'background:#e8a23a;color:#1d1300':''}">${od?'Overdue · ':dt?'Today':''}${dt?'':fmtDay(t.due)}</span>`:''}</div>
+   <div class="small muted" style="margin-top:3px">${[t.room&&ROLES[t.room]?ROLES[t.room].icon+' '+ROLES[t.room].name.split(' ')[0]:'',t.assignee?'👤 '+esc(t.assignee):'',t.qty?esc(t.qty):'',t.auto?'from plan':'',eff!==base?'(moved up — overdue)':''].filter(Boolean).join(' · ')}</div>
+   ${t.notes?`<div class="small" style="margin-top:4px">${esc(t.notes)}</div>`:''}
+   <div class="acts"><button class="chip" style="background:var(--acc);color:#fff" onclick="taskDone('${t.id}')">✓ Done</button>
+    ${i>0?`<button class="chip" title="More urgent" onclick="taskTier('${t.id}','${TIERS[i-1][0]}')">↑ ${TIERS[i-1][1].split(' ').slice(1).join(' ')}</button>`:''}
+    ${i<2?`<button class="chip" title="Less urgent" onclick="taskTier('${t.id}','${TIERS[i+1][0]}')">↓ ${TIERS[i+1][1].split(' ').slice(1).join(' ')}</button>`:''}
+    ${!t.assignee&&op()?`<button class="chip" onclick="taskSet('${t.id}','assignee',op())">I'll do it</button>`:''}
+    <button class="chip" onclick="editTask('${t.id}')">✎</button></div></div>`;
 }
-function taskSet(id,k,v){const t=db.tasks.find(x=>x.id===id);t[k]=v;if(k==='status'){t.hist.push({t:Date.now(),msg:`${v} by ${op()}`});if(v==='done')t.doneT=Date.now();t.autoCancel=false}save();render()}
-function postpone(id,d){const t=db.tasks.find(x=>x.id===id);t.due+=d*DAY;t.resched=true;t.hist.push({t:Date.now(),msg:`Postponed to ${fmtDay(t.due)} by ${op()}`});save();render()}
-function resched(id,v){const t=db.tasks.find(x=>x.id===id),d=pdate(v);if(!d)return;t.due=d;t.resched=true;t.hist.push({t:Date.now(),msg:`Rescheduled to ${fmtDay(d)} by ${op()}`});save();render()}
-function addTask(){const t=$('tk_t').value.trim();if(!t)return;db.tasks.push({id:uid(),key:'manual|'+uid(),auto:false,title:t,due:pdate($('tk_d').value)||today0(),qty:$('tk_q').value,pri:$('tk_p').value,assignee:'',status:'open',created:Date.now(),hist:[]});save();render()}
+function renderTasks(){
+  const me=op(),list=db.tasks.filter(t=>t.status==='open'&&(taskF.who==='all'||t.assignee===me)&&(!taskF.room||!t.room||t.room===taskF.room));
+  const sortT=(a,b)=>(a.due||9e15)-(b.due||9e15);
+  const done=db.tasks.filter(t=>t.status==='done').sort((a,b)=>(b.doneT||0)-(a.doneT||0)).slice(0,25);
+  const rooms=Object.keys(ROLES).filter(k=>k!=='all');
+  $('tasks').innerHTML=`<div class="row" style="justify-content:space-between">${ROLE&&ROLE!=='all'?`<button class="btn alt" onclick="goHome()">← Back to ${ROLES[ROLE].name}</button>`:!ROLE?`<button class="btn alt" onclick="chooseRole()">📍 Choose this device's room</button>`:'<span></span>'}
+    <span class="chips"><button class="chip ${taskF.who==='all'?'on':''}" onclick="taskF.who='all';renderTasks()">Everyone</button><button class="chip ${taskF.who==='mine'?'on':''}" onclick="taskF.who='mine';renderTasks()">Mine</button>
+    <select onchange="taskF.room=this.value;renderTasks()"><option value="">All rooms</option>${rooms.map(k=>`<option value="${k}" ${taskF.room===k?'selected':''}>${ROLES[k].icon} ${ROLES[k].name}</option>`).join('')}</select></span></div>
+   <div class="card"><div class="row" style="margin:0"><input id="tk_t" placeholder="Add a task… (press Enter)" style="flex:2;min-width:200px" onkeydown="if(event.key==='Enter')addTask()">
+    <select id="tk_p">${TIERS.map(([k,n])=>`<option value="${k}" ${k==='important'?'selected':''}>${n}</option>`).join('')}</select>
+    <input id="tk_d" type="date" title="Due date (optional)" onkeydown="if(event.key==='Enter')addTask()">
+    <select id="tk_r"><option value="">Any room</option>${rooms.map(k=>`<option value="${k}" ${k===ROLE?'selected':''}>${ROLES[k].icon} ${ROLES[k].name.split(' ')[0]}</option>`).join('')}</select>
+    <select id="tk_a"><option value="">Anyone</option>${people().filter(p=>!p.removed).map(p=>`<option>${esc(p.name)}</option>`).join('')}</select>
+    <button class="btn" onclick="addTask()">Add</button></div></div>
+   <div class="tboard">${TIERS.map(([k,n,d])=>{const ts=list.filter(t=>tierOf(t,true)===k).sort(sortT);
+     return `<div class="tcol ${k}"><h3>${n} <span class="small muted">${ts.length}</span></h3><div class="sub">${d}</div>${ts.map(taskCard).join('')||'<div class="small muted" style="padding:10px 4px">Nothing here 🎉</div>'}</div>`}).join('')}</div>
+   ${done.length?`<details class="card"><summary style="cursor:pointer"><b>Done recently</b> <span class="small muted">${done.length}</span></summary><table>${done.map(t=>`<tr><td>✓ ${esc(t.title)}</td><td class="small muted">${esc((t.hist[t.hist.length-1]||{}).msg||'')}</td><td class="small muted">${fmtDate(t.doneT)}</td><td><button class="chip" onclick="taskSet('${t.id}','status','open')">Undo</button></td></tr>`).join('')}</table></details>`:''}`;
+}
+function taskSet(id,k,v){const t=db.tasks.find(x=>x.id===id);if(!t)return;t[k]=v;if(k==='status'){t.hist.push({t:Date.now(),msg:`${v==='done'?'Done':v==='open'?'Reopened':v} by ${op()}`});if(v==='done')t.doneT=Date.now();t.autoCancel=false;audit(`Task ${v==='done'?'done':v}: ${t.title}`)}save();render()}
+function taskDone(id){taskSet(id,'status','done');toast('✓ Done')}
+function taskTier(id,k){const t=db.tasks.find(x=>x.id===id);if(!t)return;t.pri=k;t.hist.push({t:Date.now(),msg:`Moved to ${TIERS.find(x=>x[0]===k)[1]} by ${op()}`});save();render()}
+function postpone(id,d){const t=db.tasks.find(x=>x.id===id);t.due=(t.due||today0())+d*DAY;t.resched=true;t.hist.push({t:Date.now(),msg:`Postponed to ${fmtDay(t.due)} by ${op()}`});save();render()}
+function resched(id,v){const t=db.tasks.find(x=>x.id===id),d=pdate(v);t.due=d||null;t.resched=true;t.hist.push({t:Date.now(),msg:d?`Rescheduled to ${fmtDay(d)} by ${op()}`:`Due date removed by ${op()}`});save();render()}
+function addTask(){const title=$('tk_t').value.trim();if(!title)return toast('Type the task first');
+  db.tasks.push({id:uid(),key:'manual|'+uid(),auto:false,title,due:pdate($('tk_d').value)||null,qty:'',pri:$('tk_p').value,room:$('tk_r').value,assignee:$('tk_a').value,notes:'',status:'open',created:Date.now(),hist:[{t:Date.now(),msg:'Added by '+op()}]});
+  audit('Added task: '+title);save();render();setTimeout(()=>{const e=$('tk_t');if(e)e.focus()},0);toast('Task added')}
+function editTask(id){const t=db.tasks.find(x=>x.id===id);if(!t)return;const rooms=Object.keys(ROLES).filter(k=>k!=='all');
+  dlg(`<h3 style="margin-top:0">Edit task</h3><label>Task<input id="et_t" value="${esc(t.title)}"></label>
+  <div class="two"><label>List<select id="et_p">${TIERS.map(([k,n])=>`<option value="${k}" ${tierOf(t)===k?'selected':''}>${n}</option>`).join('')}</select></label><label>Due<input id="et_d" type="date" value="${t.due?dstr(t.due):''}"></label>
+  <label>Room<select id="et_r"><option value="">Any room</option>${rooms.map(k=>`<option value="${k}" ${t.room===k?'selected':''}>${ROLES[k].icon} ${ROLES[k].name}</option>`).join('')}</select></label>
+  <label>Assigned to<select id="et_a"><option value="">Anyone</option>${people().filter(p=>!p.removed).map(p=>`<option ${t.assignee===p.name?'selected':''}>${esc(p.name)}</option>`).join('')}</select></label></div>
+  <label>Notes<textarea id="et_n">${esc(t.notes||'')}</textarea></label>
+  ${t.hist&&t.hist.length?`<details><summary class="small muted" style="cursor:pointer">History</summary><table>${t.hist.slice().reverse().map(h=>`<tr><td class="small muted">${fmtDate(h.t)}</td><td class="small">${esc(h.msg)}</td></tr>`).join('')}</table></details>`:''}
+  <div class="act"><button class="btn xl green" onclick="saveTask('${t.id}')">Save</button><button class="btn danger" onclick="taskSet('${t.id}','status','cancelled');closeDlg()">Delete task</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`)}
+function saveTask(id){const t=db.tasks.find(x=>x.id===id),title=$('et_t').value.trim();if(!title)return toast('Task needs a name');
+  t.title=title;t.pri=$('et_p').value;const d=pdate($('et_d').value)||null;if(d!==t.due){t.due=d;t.resched=true}t.room=$('et_r').value;t.assignee=$('et_a').value;t.notes=$('et_n').value;
+  t.hist.push({t:Date.now(),msg:'Edited by '+op()});if(t.auto)t.custom=true;save();closeDlg();render();toast('Saved')}
 
 /* ================= spawn & substrate prep (sterilize / pasteurize) ================= */
 const CYCLE_TYPES={Pasteurize:{methods:['Steam','Hot water bath','Barrel / drum','Oven'],target:60,hold:120},Sterilize:{methods:['Pressure cooker','Autoclave','Atmospheric steam'],target:121,hold:150}};
@@ -1592,7 +1640,7 @@ function markHotkeys(){
   const ctx=dlgOpen?[k('Enter','Save'),k('Esc','Close')]
     :[station.block||station.spawn||station.culture?k('Esc','Done'):'',k('/','Type an ID'),
       can('lab')?k('B','Block batch')+k('S','Spawn')+k('L','LC'):'',can('prep')&&ROLE!=='all'?k('R','Start run'):'',
-      can('harvest')&&$('wt')?k('T','Tare'):'',k('A','Activity'),k('M','Room')].filter(Boolean);
+      can('harvest')&&$('wt')?k('T','Tare'):'',k('A','Activity'),k('K','Tasks'),k('M','Room')].filter(Boolean);
   bar.innerHTML=`<b style="color:var(--ink)">⌨</b>${nums.length?nums.join('')+'<span class="sep"></span>':''}${ctx.join('')}<span class="k"><kbd>?</kbd>All keys</span><button class="x" onclick="setKeybar(false)" title="Hide the key guide">Hide ✕</button>`;
 }
 const hkLater=()=>setTimeout(markHotkeys,0);
@@ -1607,7 +1655,7 @@ const HK=[
   ['/','Jump to the scan box (type an ID)',()=>true],
   ['B','Add block batch',()=>can('lab')],['S','Add spawn',()=>can('lab')],['L','Add LC (liquid culture)',()=>can('lab')],
   ['R','Start a sterilize / pasteurize run',()=>can('prep')],['P','Printer setup',()=>can('lab')],
-  ['T','Tare the scale',()=>can('harvest')],['A','Activity log',()=>true],['W','Who is using this device',()=>true],
+  ['T','Tare the scale',()=>can('harvest')],['K','Task board',()=>true],['A','Activity log',()=>true],['W','Who is using this device',()=>true],
   ['M','Change this device\'s room',()=>true],['H','Home',()=>true],['?','Show this list',()=>true]];
 function hkHelp(){dlg(`<h3 style="margin-top:0">⌨ Keyboard shortcuts</h3><table>${HK.filter(h=>h[2]()).map(([k,d])=>`<tr><td style="width:90px"><kbd>${k}</kbd></td><td>${d}</td></tr>`).join('')}</table>
   <p class="small muted">Shortcuts don't fire while you're typing in a box, and scanner input is never mistaken for a shortcut.</p><div class="row"><button class="btn alt" onclick="closeDlg()">Close</button></div>`)}
@@ -1626,6 +1674,7 @@ function runHotkey(k){
   if(K==='p'&&can('lab'))return printerSetup();
   if(K==='t'&&can('harvest')&&tab==='home'&&$('wt')){scale.tare=scale.raw||0;renderHome();return toast('Scale tared')}
   if(K==='a')return activityDialog();
+  if(K==='k')return openTaskBoard();
   if(K==='w')return whoDialog();
   if(K==='m')return chooseRole();
   if(K==='h')return goHome();
