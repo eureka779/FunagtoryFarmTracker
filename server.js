@@ -106,7 +106,8 @@ function who(req) { const t = req.headers['x-doc-token'], s = t && sessions.get(
 // Scalable recipes: admins store amounts for a base quantity; staff only ever receive the final totals.
 function fmtAmt(v, unit) {
   let u = String(unit || '').trim(), x = v;
-  if (/^g$/i.test(u) && x >= 1000) { x /= 1000; u = 'kg'; } else if (/^ml$/i.test(u) && x >= 1000) { x /= 1000; u = 'L'; }
+  if (/^kg$/i.test(u)) { x *= 1000; u = 'g'; }
+  if (/^g$/i.test(u) && x >= 1000) { x /= 453.592; u = 'lb'; } else if (/^ml$/i.test(u) && x >= 1000) { x /= 1000; u = 'L'; }
   if (/^(each|jars?|bags?|pcs?|pieces?|x|)$/i.test(u)) x = Math.ceil(x - 1e-9);
   const n = x >= 100 ? Math.round(x) : x >= 10 ? Math.round(x * 10) / 10 : Math.round(x * 100) / 100;
   return (n.toLocaleString('en-US') + (/^(each|x|pcs?|pieces?)$/i.test(u) ? '' : ' ' + u)).trim();
