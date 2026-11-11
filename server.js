@@ -115,7 +115,9 @@ function fmtAmt(v, unit) {
 function scaleDoc(d, qty, size) {
   const c = d.calc || {}, sized = !!c.sizeOn && size > 0, total = sized ? qty * size : 0;
   const f = (sized ? total : qty) / (+c.base || 1), unit = c.unit || 'batch', plural = qty === 1 || /s$/i.test(unit) ? unit : unit + 's';
-  const items = (c.items || []).filter(i => i.name).map(i => ({ name: i.name, text: fmtAmt((+i.amount || 0) * f, i.unit) }));
+  // Water measured by volume also shows its weight in pounds (1 L of water = 2.2046 lb).
+  const wtr = (i, v) => /water/i.test(i.name) && /^(ml|l)$/i.test(String(i.unit || '').trim()) ? ' (' + fmtAmt(v * (/^l$/i.test(String(i.unit).trim()) ? 1000 : 1) / 453.592, 'lb').replace(/ lb$/, '') + ' lb)' : '';
+  const items = (c.items || []).filter(i => i.name).map(i => ({ name: i.name, text: fmtAmt((+i.amount || 0) * f, i.unit) + wtr(i, (+i.amount || 0) * f) }));
   const body = String(d.body || '').replace(/\{\{\s*([^}]+?)\s*\}\}/g, (m, k) => {
     if (/^(qty|quantity|count)$/i.test(k)) return String(qty); if (/^unit$/i.test(k)) return plural;
     if (/^size$/i.test(k) && sized) return fmtAmt(size, c.sizeUnit); if (/^total$/i.test(k) && sized) return fmtAmt(total, c.sizeUnit);
