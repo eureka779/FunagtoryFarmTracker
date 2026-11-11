@@ -878,7 +878,7 @@ function quickSpawn(jarId){
 const LC_STAGES=['Growing','Ready','Empty','Contaminated'];
 function goCulture(id){station.culture=id;station.spawn=null;station.block=null;station.decision=false;station.finishing=false;if(mode.type!=='stage'&&mode.type!=='loc')mode={type:'lookup'};show('home')}
 function cultureLabel(id){const j=db.cultureJars[id],c=db.cultures.find(x=>x.id===j.lotId)||{};
-  return {code:id,title:id,lines:[{t:'LIQUID CULTURE',s:0.11,b:true},{t:[c.species,c.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(c.date)),s:0.11}]}}
+  return {code:id,title:id,lines:[{t:'LC',s:0.12,b:true},{t:[c.species,c.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(c.date)),s:0.11}]}}
 function printCulture(ids){ids=ids.filter(i=>db.cultureJars[i]);ids.forEach(i=>db.cultureJars[i].labelPrints=(db.cultureJars[i].labelPrints||0)+1);save();printItems(ids.map(cultureLabel))}
 function cultureLotJars(lot){const js=Object.values(db.cultureJars).filter(j=>j.lotId===lot);if(!js.length)return '—';const c={};js.forEach(j=>c[j.stage]=(c[j.stage]||0)+1);return LC_STAGES.filter(x=>c[x]).map(x=>`${c[x]} ${x.toLowerCase()}`).join(', ')}
 function openNewCulture(){
@@ -1237,7 +1237,7 @@ function saveTask(id){const t=db.tasks.find(x=>x.id===id),title=$('et_t').value.
 /* ================= SOPs & recipes (password-protected) =================
    Documents live only on the server — never in the shared sync or browser storage. Opening the page always asks for
    your password. Admins see and edit everything; others see only what an admin has shared with them, until it expires. */
-let LIB={token:null,admin:false,docs:[],shares:[],sel:null,edit:false,type:'all',q:''};
+let LIB={token:null,admin:false,docs:[],shares:[],sel:null,edit:false,type:'all',q:'',qty:{},out:{},draft:null};
 function openLibrary(){if(!curUser())return;$('login').style.display='none';closeDlg();show('library')}
 function libLock(){LIB.token=null;LIB.docs=[];LIB.shares=[];LIB.sel=null;LIB.edit=false}
 async function libApi(path,body){
@@ -1265,29 +1265,51 @@ function renderLibrary(){
     <div class="act" style="margin-top:10px"><button class="btn xl green" onclick="libUnlock()">Unlock</button></div><p class="small muted">Locks again when you leave this page or after 30 minutes idle.</p></div>`;
     setTimeout(()=>{const f=$('lib_pw');if(f)f.focus()},0);return}
   const q=LIB.q.toLowerCase(),list=LIB.docs.filter(d=>(LIB.type==='all'||d.type===LIB.type)&&(!q||(d.title+' '+d.body).toLowerCase().includes(q))),d=LIB.docs.find(x=>x.id===LIB.sel);
-  const item=x=>`<div class="item ${x.id===LIB.sel?'on':''}" onclick="LIB.sel='${x.id}';LIB.edit=false;renderLibrary()"><div><span class="tag ${x.type==='SOP'?'':'m'}">${x.type}</span> <b>${esc(x.title)}</b></div><div class="small muted">${x.sharedUntil?'Shared with you · '+timeLeft(x.sharedUntil):'Updated '+fmtDay(x.updated)+' by '+esc(x.by||'')}</div></div>`;
+  const item=x=>`<div class="item ${x.id===LIB.sel?'on':''}" onclick="LIB.sel='${x.id}';LIB.edit=false;renderLibrary()"><div><span class="tag ${x.type==='SOP'?'':'m'}">${x.type}</span>${x.calc&&x.calc.on?' 🧮':''} <b>${esc(x.title)}</b></div><div class="small muted">${x.sharedUntil?'Shared with you · '+timeLeft(x.sharedUntil):'Updated '+fmtDay(x.updated)+' by '+esc(x.by||'')}</div></div>`;
   let main;
   if(LIB.edit){const e=LIB.edit==='new'?{type:LIB.type==='Recipe'?'Recipe':'SOP',title:'',body:''}:d;
     main=`<div class="card"><div class="row" style="margin:0"><input id="ed_title" placeholder="Title (e.g. Flow hood cleaning)" value="${esc(e.title)}" style="flex:1;font-size:17px;font-weight:600">
       <select id="ed_type"><option ${e.type==='SOP'?'selected':''}>SOP</option><option ${e.type==='Recipe'?'selected':''}>Recipe</option></select></div>
       <textarea id="ed_body" style="margin-top:8px" placeholder="# Heading&#10;Steps:&#10;1. First step&#10;2. Second step&#10;- bullet point&#10;**bold text**">${esc(e.body)}</textarea>
       <p class="small muted" style="margin:4px 0">Formatting: <code># Heading</code> · <code>## Sub-heading</code> · <code>1. numbered step</code> · <code>- bullet</code> · <code>**bold**</code></p>
-      <div class="act"><button class="btn xl green" onclick="libSave()">Save</button><button class="btn alt" onclick="LIB.edit=false;renderLibrary()">Cancel</button></div></div>`}
+      ${calcEditor(e)}
+      <div class="act"><button class="btn xl green" onclick="libSave()">Save</button><button class="btn alt" onclick="LIB.edit=false;LIB.draft=null;renderLibrary()">Cancel</button></div></div>`}
   else if(d){const shares=LIB.shares.filter(x=>x.docId===d.id||x.docId==='*');
     main=`<div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:flex-start"><div><span class="tag ${d.type==='SOP'?'':'m'}">${d.type}</span><h2 style="margin:6px 0 2px">${esc(d.title)}</h2>
       <div class="small muted">Updated ${fmtDate(d.updated)} by ${esc(d.by||'')}${d.sharedUntil?` · <b>shared with you until ${fmtDate(d.sharedUntil)}</b>`:''}</div></div>
-      ${LIB.admin?`<span class="chips"><button class="chip" onclick="LIB.edit='edit';renderLibrary()">✎ Edit</button><button class="chip" onclick="libShareDlg('${d.id}')">🔗 Share</button>${(d.versions||[]).length?`<button class="chip" onclick="libHistory('${d.id}')">History</button>`:''}<button class="chip" onclick="libDelete('${d.id}')">Delete</button></span>`:''}</div>
-      <div class="doc">${mdLite(d.body)||'<p class="muted">Empty</p>'}</div>
+      ${LIB.admin?`<span class="chips"><button class="chip" onclick="LIB.edit='edit';LIB.draft=null;renderLibrary()">✎ Edit</button><button class="chip" onclick="libShareDlg('${d.id}')">🔗 Share</button>${(d.versions||[]).length?`<button class="chip" onclick="libHistory('${d.id}')">History</button>`:''}<button class="chip" onclick="libDelete('${d.id}')">Delete</button></span>`:''}</div>
+      ${d.calc&&d.calc.on?calcView(d):''}
+      ${d.calc&&d.calc.on&&LIB.admin?`<details style="margin:8px 0"><summary class="small muted" style="cursor:pointer">Base recipe (admins only): makes ${d.calc.base} ${esc(d.calc.unit)}</summary><table>${(d.calc.items||[]).map(i=>`<tr><td>${esc(i.name)}</td><td>${i.amount} ${esc(i.unit)}</td></tr>`).join('')}</table></details>`:''}
+      <div class="doc">${mdLite(d.calc&&d.calc.on?(LIB.out[d.id]?LIB.out[d.id].body:String(d.body||'').replace(/\{\{\s*([^}]+?)\s*\}\}/g,'—')):d.body)||'<p class="muted">Empty</p>'}</div>
       ${LIB.admin&&shares.length?`<div class="small muted" style="margin-top:12px;border-top:1px solid var(--line);padding-top:8px">Shared with: ${shares.map(x=>`${esc((people().find(p=>p.id===x.pid)||{}).name||'?')} (${timeLeft(x.until)}${x.docId==='*'?', all docs':''})`).join(' · ')}</div>`:''}</div>`}
   else main=`<div class="card muted" style="text-align:center;padding:40px">${LIB.docs.length?'Pick a document on the left.':LIB.admin?'No SOPs or recipes yet — tap <b>+ New</b>.':'Nothing has been shared with you right now.'}</div>`;
-  el.innerHTML=`<div class="row" style="justify-content:space-between">${back||'<span></span>'}<span class="chips">${LIB.admin?`<button class="btn" onclick="LIB.edit='new';LIB.sel=null;renderLibrary()">+ New</button><button class="btn alt" onclick="libShareDlg('*')">🔗 Share access…</button>`:''}<button class="btn alt" onclick="libLock();renderLibrary()">🔒 Lock</button></span></div>
+  el.innerHTML=`<div class="row" style="justify-content:space-between">${back||'<span></span>'}<span class="chips">${LIB.admin?`<button class="btn" onclick="LIB.edit='new';LIB.sel=null;LIB.draft=null;renderLibrary()">+ New</button><button class="btn alt" onclick="libShareDlg('*')">🔗 Share access…</button>`:''}<button class="btn alt" onclick="libLock();renderLibrary()">🔒 Lock</button></span></div>
    <div class="lib"><div class="card" style="padding:10px"><input placeholder="Search…" value="${esc(LIB.q)}" style="width:100%" oninput="LIB.q=this.value;renderLibrary();const f=document.querySelector('#library input');f.focus();f.setSelectionRange(f.value.length,f.value.length)">
      <div class="chips" style="margin:8px 0">${[['all','All'],['SOP','SOPs'],['Recipe','Recipes']].map(([k,n])=>`<button class="chip ${LIB.type===k?'on':''}" onclick="LIB.type='${k}';renderLibrary()">${n}</button>`).join('')}</div>
      ${list.map(item).join('')||'<div class="small muted" style="padding:8px">Nothing found.</div>'}</div><div>${main}</div></div>
    ${LIB.admin&&LIB.shares.length?`<div class="card"><b>Active shares</b><table>${LIB.shares.slice().sort((a,b)=>a.until-b.until).map(x=>`<tr><td>👤 ${esc((people().find(p=>p.id===x.pid)||{}).name||'?')}</td><td>${x.docId==='*'?'<b>All SOPs & recipes</b>':esc((LIB.docs.find(d=>d.id===x.docId)||{}).title||'(deleted)')}</td><td class="small muted">until ${fmtDate(x.until)} · ${timeLeft(x.until)}</td><td class="small muted">by ${esc(x.by)}</td><td><button class="chip" onclick="libUnshare('${x.id}')">Revoke</button></td></tr>`).join('')}</table></div>`:''}`;
 }
-async function libSave(){const body={id:LIB.edit==='edit'?LIB.sel:undefined,title:$('ed_title').value.trim(),type:$('ed_type').value,body:$('ed_body').value};if(!body.title)return toast('Give it a title');
-  try{const d=await libApi('api/docs/save',body);LIB.sel=d.id;LIB.edit=false;audit(`Saved ${d.type}: ${d.title}`);save();await libLoad();toast('Saved')}catch(e){if(e.message!=='locked')toast(e.message)}}
+function calcEditor(e){
+  const c=e.calc&&e.calc.on?e.calc:{on:false,unit:'LC jar',base:1,items:[]};if(!LIB.draft)LIB.draft=(c.items||[]).map(i=>Object.assign({},i));if(!LIB.draft.length)LIB.draft.push({name:'',amount:'',unit:'g'});
+  return `<details class="card" style="background:var(--bg);margin-top:10px" ${c.on?'open':''}><summary style="cursor:pointer"><b>🧮 Make it a calculator</b> <span class="small muted">— staff type how many they need and only see the final amounts</span></summary>
+   <label style="display:flex;gap:8px;align-items:center;color:var(--ink);margin-top:10px"><input type="checkbox" id="cc_on" style="width:auto" ${c.on?'checked':''}> Turn the calculator on for this document</label>
+   <div class="two"><label>What does it make? (singular)<input id="cc_unit" value="${esc(c.unit||'')}" placeholder="LC jar"></label><label>The amounts below make…<input id="cc_base" type="number" step="any" min="0.01" value="${c.base||1}"></label></div>
+   <table><tr><th>Ingredient</th><th>Amount</th><th>Unit</th><th></th></tr><tbody id="cc_rows">${calcRows()}</tbody></table>
+   <div class="row"><button class="chip" onclick="calcRead();LIB.draft.push({name:'',amount:'',unit:'g'});$('cc_rows').innerHTML=calcRows()">+ Add ingredient</button></div>
+   <datalist id="cc_units"><option>g</option><option>kg</option><option>ml</option><option>L</option><option>oz</option><option>lb</option><option>tsp</option><option>tbsp</option><option>cup</option><option>each</option></datalist>
+   <p class="small muted">In the steps, type <code>{{Honey}}</code> where the honey amount should appear, <code>{{qty}}</code> for how many they're making, and <code>{{unit}}</code> for "LC jars". Staff never see these per-unit amounts — only the totals.</p></details>`}
+function calcRows(){return LIB.draft.map((r,i)=>`<tr><td><input class="cc_n" value="${esc(r.name)}" placeholder="Honey" style="width:100%"></td><td><input class="cc_a" type="number" step="any" value="${r.amount}" style="width:100px"></td><td><input class="cc_u" list="cc_units" value="${esc(r.unit||'')}" style="width:80px"></td><td><button class="chip" onclick="calcRead();LIB.draft.splice(${i},1);$('cc_rows').innerHTML=calcRows()">✕</button></td></tr>`).join('')}
+function calcRead(){const n=[...document.querySelectorAll('.cc_n')],a=[...document.querySelectorAll('.cc_a')],u=[...document.querySelectorAll('.cc_u')];LIB.draft=n.map((x,i)=>({name:x.value.trim(),amount:a[i].value,unit:u[i].value.trim()}))}
+async function libScale(id){const q=+$('calc_q').value;if(!(q>0))return toast('Enter how many you need');LIB.qty[id]=q;
+  try{LIB.out[id]=await libApi('api/docs/scale',{id,qty:q});renderLibrary()}catch(e){if(e.message!=='locked')toast(e.message)}}
+function calcView(d){const o=LIB.out[d.id],u=d.calc.unit||'batch';
+  return `<div class="card" style="background:var(--bg);border-color:var(--acc)"><b style="font-size:16px">🧮 How many ${esc(u)}${/s$/i.test(u)?'':'s'} do you need to make?</b>
+   <div class="row"><input id="calc_q" type="number" min="1" step="any" value="${LIB.qty[d.id]||''}" placeholder="e.g. 6" style="width:120px;font-size:20px;padding:8px" onkeydown="if(event.key==='Enter')libScale('${d.id}')"><button class="btn xl green" style="width:auto" onclick="libScale('${d.id}')">Show what I need</button></div>
+   ${o?`<h3 style="margin:14px 0 6px">For ${o.qty} ${esc(o.unit)} you need:</h3><div>${o.items.map((it,i)=>`<label style="display:flex;gap:10px;align-items:center;font-size:17px;color:var(--ink);margin:6px 0"><input type="checkbox" style="width:22px;height:22px"> <b style="min-width:110px;display:inline-block">${esc(it.text)}</b> ${esc(it.name)}</label>`).join('')}</div>`:''}</div>`}
+async function libSave(){const body={id:LIB.edit==='edit'?LIB.sel:undefined,title:$('ed_title').value.trim(),type:$('ed_type').value,body:$('ed_body').value};
+  if($('cc_on')){calcRead();body.calc={on:$('cc_on').checked,unit:$('cc_unit').value.trim()||'batch',base:+$('cc_base').value||1,items:LIB.draft.filter(r=>r.name)};
+    if(body.calc.on&&!body.calc.items.length)return toast('Add at least one ingredient, or turn the calculator off')}if(!body.title)return toast('Give it a title');
+  try{const d=await libApi('api/docs/save',body);LIB.sel=d.id;LIB.edit=false;LIB.draft=null;delete LIB.out[d.id];audit(`Saved ${d.type}: ${d.title}`);save();await libLoad();toast('Saved')}catch(e){if(e.message!=='locked')toast(e.message)}}
 async function libDelete(id){const d=LIB.docs.find(x=>x.id===id);if(!confirm(`Delete "${d.title}"? This can't be undone.`))return;try{await libApi('api/docs/delete',{id});audit(`Deleted ${d.type}: ${d.title}`);save();LIB.sel=null;await libLoad()}catch(e){}}
 function libHistory(id){const d=LIB.docs.find(x=>x.id===id);dlg(`<h3 style="margin-top:0">Earlier versions — ${esc(d.title)}</h3>${(d.versions||[]).slice().reverse().map((v,i)=>`<details class="card"><summary style="cursor:pointer">${fmtDate(v.t)} by ${esc(v.by||'')}</summary><div class="doc">${mdLite(v.body)}</div></details>`).join('')}<div class="row"><button class="btn alt" onclick="closeDlg()">Close</button></div>`)}
 function libShareDlg(docId){const d=LIB.docs.find(x=>x.id===docId),staff=people().filter(p=>!p.removed&&!p.admin);
