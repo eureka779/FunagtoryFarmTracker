@@ -103,6 +103,22 @@ const sha = (salt, pw) => crypto.createHash('sha256').update(salt + ':' + pw).di
 function readBody(req) { return new Promise((ok, bad) => { let b = ''; req.on('data', c => { b += c; if (b.length > 5e6) req.destroy(); }); req.on('end', () => { try { ok(JSON.parse(b || '{}')); } catch (e) { bad(e); } }); }); }
 function who(req) { const t = req.headers['x-doc-token'], s = t && sessions.get(t); if (!s || s.exp < Date.now()) return null;
   const p = people().find(x => x.id === s.pid && !x.removed); if (!p) return null; s.exp = Date.now() + 30 * 6e4; return p; }
+// Scalable recipes: admins store amounts for a base quantity; staff only ever receive the final totals.
+function fmtAmt(v, unit) {
+  let u = String(unit || '').trim(), x = v;
+  if (/^g$/i.test(u) && x >= 1000) { x /= 1000; u = 'kg'; } else if (/^ml$/i.test(u) && x >= 1000) { x /= 1000; u = 'L'; }
+  if (/^(each|jars?|bags?|pcs?|pieces?|x|)$/i.test(u)) x = Math.ceil(x - 1e-9);
+  const n = x >= 100 ? Math.round(x) : x >= 10 ? Math.round(x * 10) / 10 : Math.round(x * 100) / 100;
+  return (n.toLocaleString('en-US') + (/^(each|x|pcs?|pieces?)$/i.test(u) ? '' : ' ' + u)).trim();
+}
+function scaleDoc(d, qty) {
+  const c = d.calc || {}, f = qty / (+c.base || 1), unit = c.unit || 'batch', plural = qty === 1 || /s$/i.test(unit) ? unit : unit + 's';
+  const items = (c.items || []).filter(i => i.name).map(i => ({ name: i.name, text: fmtAmt((+i.amount || 0) * f, i.unit) }));
+  const body = String(d.body || '').replace(/\{\{\s*([^}]+?)\s*\}\}/g, (m, k) => {
+    if (/^(qty|quantity|count)$/i.test(k)) return String(qty); if (/^unit$/i.test(k)) return plural;
+    const it = items.find(i => i.name.toLowerCase() === k.toLowerCase()); return it ? it.text : m; });
+  return { qty, unit: plural, items, body };
+}
 const activeShares = () => docs.shares.filter(x => x.until > Date.now());
 const visibleTo = p => p.admin ? docs.docs : docs.docs.filter(d => activeShares().some(x => x.pid === p.id && (x.docId === d.id || x.docId === '*')));
 async function docsApi(req, res, u) {
@@ -117,8 +133,15 @@ async function docsApi(req, res, u) {
     const p = who(req); if (!p) return send(res, 401, '{"error":"locked"}');
     if (u.pathname === '/api/docs' && req.method === 'GET') {
       const list = visibleTo(p).map(d => Object.assign({}, d, { versions: p.admin ? d.versions : undefined,
+        calc: d.calc && d.calc.on ? (p.admin ? d.calc : { on: true, unit: d.calc.unit, items: (d.calc.items || []).map(i => ({ name: i.name })) }) : undefined,
         sharedUntil: p.admin ? undefined : Math.max(...activeShares().filter(x => x.pid === p.id && (x.docId === d.id || x.docId === '*')).map(x => x.until)) }));
       return send(res, 200, JSON.stringify({ admin: !!p.admin, docs: list, shares: p.admin ? activeShares() : [] }));
+    }
+    if (u.pathname === '/api/docs/scale' && req.method === 'POST') {
+      const b = await readBody(req), d = visibleTo(p).find(x => x.id === b.id), q = Math.round(+b.qty * 100) / 100;
+      if (!d || !d.calc || !d.calc.on) return send(res, 404, '{"error":"Not found"}');
+      if (!(q > 0 && q <= 100000)) return send(res, 400, '{"error":"Enter a number above 0"}');
+      return send(res, 200, JSON.stringify(scaleDoc(d, q)));
     }
     if (!p.admin) return send(res, 403, '{"error":"Admins only"}');
     const b = await readBody(req);
@@ -126,7 +149,9 @@ async function docsApi(req, res, u) {
       const now = Date.now(); let d = docs.docs.find(x => x.id === b.id);
       if (!d) { d = { id: crypto.randomBytes(8).toString('hex'), created: now, versions: [] }; docs.docs.push(d); }
       else if (d.body !== b.body || d.title !== b.title) d.versions = (d.versions || []).concat([{ t: d.updated, by: d.by, title: d.title, body: d.body }]).slice(-20);
-      Object.assign(d, { type: b.type === 'Recipe' ? 'Recipe' : 'SOP', title: String(b.title || 'Untitled').slice(0, 200), body: String(b.body || ''), updated: now, by: p.name });
+      const calc = b.calc && b.calc.on ? { on: true, unit: String(b.calc.unit || 'batch').slice(0, 40), base: Math.max(0.01, +b.calc.base || 1),
+        items: (b.calc.items || []).filter(i => i && i.name).slice(0, 60).map(i => ({ name: String(i.name).slice(0, 80), amount: +i.amount || 0, unit: String(i.unit || '').slice(0, 12) })) } : undefined;
+      Object.assign(d, { type: b.type === 'Recipe' ? 'Recipe' : 'SOP', title: String(b.title || 'Untitled').slice(0, 200), body: String(b.body || ''), calc, updated: now, by: p.name });
       saveDocs(); return send(res, 200, JSON.stringify(d));
     }
     if (u.pathname === '/api/docs/delete') { docs.docs = docs.docs.filter(x => x.id !== b.id); docs.shares = docs.shares.filter(x => x.docId !== b.id); saveDocs(); return send(res, 200, '{}'); }
