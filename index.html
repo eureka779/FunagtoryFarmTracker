@@ -1130,7 +1130,7 @@ function forecast(S){
     if(!(y1e>0)){flags.push(`${esc(S)}: no flush-1 yield set, so new blocks can't be planned`);break}
     const blocks=Math.ceil(gap/y1e),inoc=w.ws+2*DAY-lead1;
     if(inoc<t0){w.late=true;flags.push(`${esc(S)}, week of ${fmtDay(w.ws)}: short ${fmtW(gap)} and too late to inoculate (would have needed ${fmtDay(inoc)})`);continue}
-    const p={S,week:w.ws,blocks,inoc,prep:inoc-DAY,spawn:inoc-L.spawnDays*DAY,culture:inoc-(+L.spawnDays+ +L.cultureDays)*DAY,spawnG:blocks*L.spawnPer,flags:[]};
+    const p={S,week:w.ws,blocks,inoc,prep:inoc-DAY,spawn:inoc-L.spawnDays*DAY,culture:inoc-(+L.spawnDays+ +L.cultureDays)*DAY,spawnG:0,bags:0,flags:[]};{const r=spawnRatio(),pb=+L.perBag||r.blocks;p.bags=Math.ceil(blocks/pb);p.spawnG=p.bags*r.lb*453.592}
     if(p.spawn<t0){if(stock>=p.spawnG)stock-=p.spawnG;else{p.flags.push('not enough spawn in stock and too late to make more');flags.push(`${esc(S)}: inoculating ${blocks} blocks by ${fmtDay(inoc)} needs ${fmtW(p.spawnG)} spawn — only ${fmtW(stock)} unallocated`);stock=0}}
     else if(p.culture<t0&&!db.cultures.some(c=>vMatch(S,c.species,c.strain)&&c.status!=='Retired')){p.flags.push('no active culture lot');flags.push(`${esc(S)}: spawn must start ${fmtDay(p.spawn)} but there is no active culture lot`)}
     plans.push(p);w.plan=p;let t=w.ws+2*DAY;for(let f=0;f<3;f++){if(ys[f]>0)bucket(t,blocks*ys[f]*(1-fail),'planned');t+=betw*DAY}
@@ -1174,12 +1174,12 @@ function renderPlanning(){
    ${f.weeks.map(w=>`<tr><td>${fmtDay(w.ws)}</td><td class="n">${fmtW(w.target)}</td><td class="n">${w.normal||w.addl?fmtW(w.normal)+(w.addl?` +${fmtW(w.addl)} extra`:''):'—'}</td><td class="n">${fmtW(w.demand)}</td><td class="n">${fmtW(w.existing)}${w.existing?` <span class="muted small">±${fmtW(w.existing*f.unc)}</span>`:''}</td><td class="n">${w.planned?fmtW(w.planned):'—'}</td>
      <td class="n ${w.late||w.net<-1?'bad':w.demand?'good':''}">${w.late?'Short '+fmtW(-w.net):w.net<-1?'Short '+fmtW(-w.net):w.demand?'+'+fmtW(w.net):'—'}</td>
      <td>${w.plan?`<b>${w.plan.blocks} blocks</b> by ${fmtDay(w.plan.inoc)}${w.plan.flags.length?` <span class="bad">⚠ ${esc(w.plan.flags.join(', '))}</span>`:''}`:''}</td>
-     <td class="small">${w.plan?`Culture ${fmtDay(w.plan.culture)} · Spawn ${fmtDay(w.plan.spawn)} (${fmtW(w.plan.spawnG)}) · Substrate ${fmtDay(w.plan.prep)}`:''}</td></tr>`).join('')}</table></div></div>`).join('')||'<div class="card muted">Add a variety below (set a weekly target) to see a forecast.</div>'}
+     <td class="small">${w.plan?`Culture ${fmtDay(w.plan.culture)} · Spawn ${fmtDay(w.plan.spawn)} (${w.plan.bags} bag${w.plan.bags===1?'':'s'}) · Substrate ${fmtDay(w.plan.prep)}`:''}</td></tr>`).join('')}</table></div></div>`).join('')||'<div class="card muted">Add a variety below (set a weekly target) to see a forecast.</div>'}
   <div class="card"><b>Weekly targets &amp; lead times per variety</b><p class="small muted">Lead times and yields here are starting assumptions. Once 3+ blocks have real data (5+ closed blocks for failure rate), measured averages replace them automatically.</p>
-   <div class="scroll"><table><tr><th>Variety</th><th>Weekly target (${U()})</th><th>Incubation days</th><th>Fruit→1st harvest</th><th>Days between flushes</th><th>F1 / block (${U()})</th><th>F2</th><th>F3</th><th>Failure %</th><th>Spawn lead days</th><th>Culture lead days</th><th>Spawn per block (g)</th><th></th></tr>
+   <div class="scroll"><table><tr><th>Variety</th><th>Weekly target (${U()})</th><th>Incubation days</th><th>Fruit→1st harvest</th><th>Days between flushes</th><th>F1 / block (${U()})</th><th>F2</th><th>F3</th><th>Failure %</th><th>Spawn lead days</th><th>Culture lead days</th><th>Blocks per ${spawnRatio().lb} lb spawn bag</th><th></th></tr>
    ${sp.map(S=>{const L=lead(S),v=vSplit(S),g=v.st!=null?(db.strains.find(x=>vMatch(S,x.species,x.strain))||{}).genetics:'',strs=v.st==null?db.strains.filter(x=>x.species===S).map(x=>x.strain).filter(Boolean):[];
      return `<tr><td><b>${esc(v.sp)}</b>${v.st!=null?`<div>${esc(v.st)}${g?` <span class="small muted">· ${esc(g)}</span>`:''}</div>`:strs.length?`<div class="small muted">all strains: ${esc(strs.join(', '))}</div>`:''}</td><td><input data-sp="${esc(S)}" data-k="target" type="number" step="any" value="${wOut(db.targets[S]||0)}" style="width:80px" onchange="setPlan(this)"></td>
-     ${['incub','first','between','y1','y2','y3','fail','spawnDays','cultureDays','spawnPer'].map(k=>`<td><input data-sp="${esc(S)}" data-k="${k}" type="number" step="any" value="${/^y\d/.test(k)?wOut(L[k]):L[k]}" style="width:72px" onchange="setPlan(this)"></td>`).join('')}<td><button class="chip" title="Remove from planning" onclick="delPlanVariety(${JSON.stringify(S).replace(/"/g,'&quot;')})">✕</button></td></tr>`}).join('')}</table></div>
+     ${['incub','first','between','y1','y2','y3','fail','spawnDays','cultureDays','perBag'].map(k=>`<td><input data-sp="${esc(S)}" data-k="${k}" type="number" step="any" value="${/^y\d/.test(k)?wOut(L[k]):k==='perBag'?(+L.perBag||spawnRatio().blocks):L[k]}" style="width:72px" onchange="setPlan(this)"></td>`).join('')}<td><button class="chip" title="Remove from planning" onclick="delPlanVariety(${JSON.stringify(S).replace(/"/g,'&quot;')})">✕</button></td></tr>`}).join('')}</table></div>
    <div class="row">${planPicker(sp)}<button class="btn alt" onclick="addPlanVariety()">Add</button>
    <span class="muted small">Overall weekly target: <b>${fmtW(sum(Object.values(db.targets).map(Number)))}</b></span></div></div>
   <div class="card"><b>Customer orders</b><div class="scroll"><table><tr><th>Customer</th><th>Variety</th><th class="n">Amount</th><th>Delivery</th><th>Repeats</th><th>Counts as</th><th></th></tr>
@@ -1204,18 +1204,33 @@ function pvaCard(){
 /* Planned production, worked out fresh from Planning every time it is shown. It appears only on the
    Weekly production tab — never on the task board. */
 function planWant(){
-  const want={},t0=today0(),room=t=>/Inoculate|substrate/i.test(t)?'lab':/fruiting/i.test(t)?'grow':/culture|spawn/i.test(t)?'lab':'';
-  const add=(k,w)=>{w.room=room(w.title);want[k]=w};
-  planSpecies().forEach(S=>{const f=forecast(S);f.plans.forEach(p=>{const d=dstr(p.inoc),base=`${S}|${d}`;
-    if(p.spawn>=t0){add(base+'|culture',{title:`Begin culture work for ${S} (for ${p.blocks} blocks inoculating ${fmtDay(p.inoc)})`,due:p.culture,qty:''});
-      add(base+'|spawn',{title:`Prepare & inoculate ${fmtW(p.spawnG)} ${S} spawn`,due:p.spawn,qty:fmtW(p.spawnG)})}
-    else add(base+'|spawnstock',{title:`Set aside ${fmtW(p.spawnG)} ${S} spawn from stock`,due:p.prep,qty:fmtW(p.spawnG)});
-    add(base+'|substrate',{title:`Prepare substrate & sterilize ${p.blocks} ${S} blocks`,due:p.prep,qty:p.blocks+' blocks'});
-    add(base+'|inoc',{title:`Inoculate ${p.blocks} blocks of ${S}`,due:p.inoc,qty:p.blocks+' blocks'})})});
+  const want={},t0=today0(),room={culture:'lab',spawn:'lab',spawnstock:'lab',substrate:'prep',inoc:'lab',fruit:'grow'};
+  const add=(k,w)=>{w.room=room[w.type]||'';want[k]=w};
+  planSpecies().forEach(S=>{const f=forecast(S);f.plans.forEach(p=>{const d=dstr(p.inoc),base=`${S}|${d}`,o={S,blocks:p.blocks,bags:p.bags,inocDue:p.inoc};
+    if(p.spawn>=t0){add(base+'|culture',Object.assign({type:'culture',due:p.culture},o));add(base+'|spawn',Object.assign({type:'spawn',due:p.spawn},o))}
+    else add(base+'|spawnstock',Object.assign({type:'spawnstock',due:p.prep},o));
+    add(base+'|substrate',Object.assign({type:'substrate',due:p.prep},o));
+    add(base+'|inoc',Object.assign({type:'inoc',due:p.inoc},o))})});
   Object.values(db.batches).forEach(bt=>{const bl=batchBlocks(bt.id).filter(b=>b.stage==='Inoculated'||b.stage==='Incubating');if(!bl.length)return;
     const ready=pdate(bt.inocDate)+param(vKey(bt.species,bt.strain)in db.lead?vKey(bt.species,bt.strain):bt.species,'incub').v*DAY;
-    if(ready<=t0+2*DAY)add(`fruit|${bt.id}`,{title:`Move batch ${bt.id} (${bl.length} ${bt.species}${bt.strain?' '+bt.strain:''}) into fruiting`,due:ready,qty:bl.length+' blocks'})});
+    if(ready<=t0+2*DAY)add(`fruit|${bt.id}`,{type:'fruit',S:vKey(bt.species,bt.strain),batch:bt.id,blocks:bl.length,due:ready})});
   return want}
+/* The week's planned jobs, added up per variety and job, all on the farm's production day. */
+const PLAN_ORDER=['culture','spawn','spawnstock','substrate','inoc','fruit'];
+function prodDay(){const d=+db.settings.prodDay;return d>=0&&d<=6?d:0}
+function weekPlan(ws){const t0=today0(),agg={};
+  Object.entries(planWant()).forEach(([k,w])=>{const due=Math.max(w.due,t0),wsx=weekStart(due);if(wsx!==ws)return;
+    if(w.type==='fruit'){agg[k]={key:k,type:'fruit',S:w.S,blocks:w.blocks,batch:w.batch,due,late:w.due<t0};return}
+    const key=`${w.type}|${w.S}|${dstr(ws)}`,a=agg[key]=agg[key]||{key,type:w.type,S:w.S,blocks:0,bags:0,due:Math.max(ws+prodDay()*DAY,t0),late:ws+prodDay()*DAY<t0};
+    a.blocks+=w.blocks;a.bags+=w.bags;if(w.due<t0)a.late=true});
+  const bag=spawnRatio().lb,pl=n=>n===1?'':'s';
+  return Object.values(agg).map(a=>{a.title={culture:`Begin culture work for ${a.S} (for ${a.blocks} blocks)`,spawn:`Make ${a.bags} ${a.S} spawn bag${pl(a.bags)} (${bag} lb each, for ${a.blocks} blocks)`,
+      spawnstock:`Set aside ${a.bags} ${a.S} spawn bag${pl(a.bags)} from stock (for ${a.blocks} blocks)`,substrate:`Prepare substrate & sterilize ${a.blocks} ${a.S} blocks`,
+      inoc:`Inoculate ${a.blocks} blocks of ${a.S}`,fruit:`Move batch ${a.batch} (${a.blocks} ${a.S}) into fruiting`}[a.type];
+    a.qty=a.type==='spawn'||a.type==='spawnstock'?a.bags+' bag'+pl(a.bags):a.blocks+' blocks';a.room={culture:'lab',spawn:'lab',spawnstock:'lab',substrate:'prep',inoc:'lab',fruit:'grow'}[a.type];
+    if(a.type==='inoc'){a.made=inocMade(a.S,ws);if(a.made>=a.blocks)a.auto=true}return a}).sort((x,y)=>PLAN_ORDER.indexOf(x.type)-PLAN_ORDER.indexOf(y.type)||x.S.localeCompare(y.S))}
+/* Blocks of this variety inoculated during the week (any batch). */
+function inocMade(S,ws){return Object.values(db.batches).filter(bt=>{const t=pdate(bt.inocDate);return t>=ws&&t<ws+7*DAY&&vMatch(S,bt.species,bt.strain)}).reduce((n,bt)=>n+batchBlocks(bt.id).length,0)}
 /* Older versions copied planned production onto the task board. Take those copies off it; any the
    person edited by hand become ordinary tasks. */
 function genTasks(){if(!db.tasks.some(t=>t.auto))return;db.tasks.forEach(t=>{if(t.auto&&t.custom){t.auto=false;t.key=undefined}});db.tasks=db.tasks.filter(t=>!t.auto);save()}
@@ -1569,7 +1584,7 @@ function setPageCSS(){
   s.textContent=`.label{width:${w}mm;height:${h}mm;padding:2mm}.label .qr,.label .qr img,.label .qr canvas{width:${q}mm!important;height:${q}mm!important}@media print{@page{size:${w}mm ${h}mm;margin:0}}`;
 }
 const labelHTML=it=>`<div class="label"><div class="qr" data-code="${esc(it.code)}"></div><div><b>${esc(it.title)}</b>${(it.lines||[]).map(l=>!l?'':typeof l==='string'?`<small>${esc(l)}</small>`:`<small style="font-size:${Math.round(l.s/0.11*10)}px;${l.b?'font-weight:700;':''}line-height:1.15">${esc(l.t)}</small>`).join('')}</div></div>`;
-function blockLabel(id){const b=db.blocks[id],bt=batchOf(b);return {code:id,title:id,lines:[{t:'FB',s:0.12,b:true},{t:[bt.species,bt.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Inoc '+fmtDay(blockInocT(b)),s:0.11}]}}
+function blockLabel(id){const b=db.blocks[id],bt=batchOf(b);return {code:id,title:id,lines:[{t:'FB',s:0.12,b:true},{t:[bt.species,bt.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Inoc '+fmtDay(blockInocT(b))+(bt.spawnBag||bt.spawnLot?' · Spawn '+(bt.spawnBag||bt.spawnLot):''),s:0.11}]}}
 function renderQR(root){if(typeof QRCode==='undefined'){toast('QR library not loaded (offline?)');return}root.querySelectorAll('.qr').forEach(el=>{el.innerHTML='';new QRCode(el,{text:el.dataset.code,width:168,height:168,correctLevel:QRCode.CorrectLevel.M})})}
 function dialogPrint(items){const z=$('printZone');setPageCSS();z.innerHTML=items.map(labelHTML).join('');renderQR(z);setTimeout(()=>window.print(),350)}
 function printItems(items){if(!items.length)return toast('Nothing to print');if(PRINTER==='bt')return phPrint(items);dialogPrint(items)}
@@ -1768,9 +1783,32 @@ const wkDone=(id,wk)=>db.weeklyDone.find(x=>x.id===id+'|'+wk);
 function wkToggle(id,wk){const ex=wkDone(id,wk),j=db.weekly.find(x=>x.id===id);
   if(ex)db.weeklyDone=db.weeklyDone.filter(x=>x!==ex);else db.weeklyDone.push({id:id+'|'+wk,tpl:id,wk,t:Date.now(),op:op()});
   audit(`Weekly: ${ex?'un-ticked':'done'} — ${j?j.title:''} (week of ${wk})`);save();renderWeekly()}
-function wkPlanToggle(i,wk){const x=(WK.items||[])[i];if(!x)return;const id='plan:'+x.key,ex=db.weeklyDone.find(d=>d.id===id);
+function wkPlanToggle(i,wk){const x=(WK.items||[])[i];if(!x)return;if(x.done&&x.done.auto){toast('All the blocks for this are made');return renderWeekly()}const id='plan:'+x.key,ex=db.weeklyDone.find(d=>d.id===id);
   if(ex)db.weeklyDone=db.weeklyDone.filter(d=>d!==ex);else db.weeklyDone.push({id,plan:true,key:x.key,wk,day:Math.floor((x.due-weekStart(x.due))/DAY),title:x.title,qty:x.qty,room:x.room,t:Date.now(),op:op()});
   audit(`Weekly: ${ex?'un-ticked':'done'} — ${x.title}`);save();renderWeekly()}
+let INOC=null;
+function inocOpen(i){const x=(WK.items||[])[i];if(!x)return;INOC={S:x.S,need:x.blocks,ws:WK.ws,batches:[]};inocDraw()}
+function inocDraw(){if(!INOC)return;const made=inocMade(INOC.S,INOC.ws),left=Math.max(0,INOC.need-made);
+  const bags=Object.values(db.spawnBags).filter(b=>b.stage!=='Used'&&b.stage!=='Contaminated').map(b=>({b,l:db.spawn.find(x=>x.id===b.lotId)||{}})).filter(o=>vMatch(INOC.S,o.l.species,o.l.strain));
+  dlg(`<h3 style="margin-top:0">🧪 Inoculate ${esc(INOC.S)}</h3>
+   <div class="grid"><div class="stat"><b>${INOC.need}</b><span>blocks needed this week</span></div><div class="stat"><b>${made}</b><span>made so far</span></div><div class="stat"><b style="${left?'':'color:var(--acc2)'}">${left||'✓'}</b><span>${left?'still to make':'all done'}</span></div></div>
+   <label style="margin-top:12px">Scan a spawn bag<input id="inoc_scan" autocomplete="off" placeholder="Scan or type the spawn bag ID" style="font-size:20px;padding:10px" onkeydown="if(event.key==='Enter'){event.preventDefault();event.stopPropagation();const v=this.value;this.value='';inocScan(v)}"></label>
+   <p class="small muted" style="margin:4px 0">Each bag starts a new block batch (${spawnRatio().blocks} blocks per ${spawnRatio().lb} lb bag) and prints its labels. Each label shows the spawn bag it came from.</p>
+   ${INOC.batches.length?`<div class="alert info small">Made now: ${INOC.batches.map(b=>`Batch <b>${esc(b.id)}</b> (${b.n} blocks, spawn ${esc(b.spawn)})`).join(' · ')}</div>`:''}
+   ${bags.length?`<p class="small muted" style="margin:6px 0 0">Ready ${esc(INOC.S)} spawn: ${bags.slice(0,12).map(o=>esc(o.b.id)).join(', ')}${bags.length>12?'…':''}</p>`:`<p class="small" style="color:var(--warn);margin:6px 0 0">No unused ${esc(INOC.S)} spawn bags on record.</p>`}
+   <div class="act"><button class="btn alt" onclick="INOC=null;closeDlg();renderWeekly()">Done</button></div>`);
+  setTimeout(()=>{const f=$('inoc_scan');if(f)f.focus()},0)}
+function inocScan(raw){if(!INOC)return;const id=normId(raw);if(!id)return;const sb=db.spawnBags[id];
+  if(!sb){beep(250);toast(db.blocks[id]?`${id} is a block, not a spawn bag`:`${id} isn't a spawn bag`);return inocDraw()}
+  if(sb.stage==='Used'){beep(250);toast(`${id} was already used${sb.batches&&sb.batches.length?' for batch '+sb.batches.join(', '):''}`);return inocDraw()}
+  if(sb.stage==='Contaminated'){beep(250);toast(`${id} is marked contaminated`);return inocDraw()}
+  const l=db.spawn.find(x=>x.id===sb.lotId)||{};
+  if(!vMatch(INOC.S,l.species,l.strain)&&!confirm(`${id} is ${[l.species,l.strain].filter(Boolean).join(' ')||'unknown spawn'}, not ${INOC.S}. Use it anyway?`))return inocDraw();
+  const d=batchDefault(l.species);
+  if(d.w==null){const w=prompt(`Block weight for ${l.species} (${db.settings.unit==='lb'?'lb':'g'}) — only asked once:`);if(w==null||!(+w>0))return inocDraw();d.w=wIn(+w)}
+  const bt=makeBatch({species:l.species,strain:l.strain,strainId:l.strainId||'',count:blocksFromBag(l),blockWeight:d.w,spawnLot:l.id,spawnBag:id,cycleId:defaultCycle('substrate')});
+  if(!bt)return inocDraw();beep();INOC.batches.push({id:bt.id,n:bt.count,spawn:id});
+  printBlocks(batchBlocks(bt.id).map(b=>b.id));inocDraw();renderWeekly()}
 function wkForm(j){j=j||{};const rooms=Object.keys(ROLES).filter(k=>k!=='all');
   return `<div class="two"><label>Day<select id="wk_day">${WDAYS.map((d,i)=>`<option value="${i}" ${i===(j.day??0)?'selected':''}>${d}</option>`).join('')}</select></label>
     <label>Room<select id="wk_room"><option value="">Any room</option>${rooms.map(k=>`<option value="${k}" ${k===j.room?'selected':''}>${ROLES[k].icon} ${ROLES[k].name}</option>`).join('')}</select></label></div>
@@ -1789,10 +1827,10 @@ function wkDel(id){const j=db.weekly.find(x=>x.id===id);if(!j||!confirm(`Delete 
 function renderWeekly(){const el=$('weekly');if(!el)return;
   const ws=weekStart(Date.now())+WK.off*7*DAY,wk=dstr(ws),today=WK.off===0?(new Date().getDay()+6)%7:-1,me=op(),mine=WK.mine;
   const back=ROLE&&ROLE!=='all'?`<button class="btn alt" onclick="goHome()">← Back to ${ROLES[ROLE].name}</button>`:'';
-  const t0=today0(),want=planWant(),jobs=db.weekly.filter(j=>!mine||!j.who||j.who===me);
-  const plan=Object.entries(want).map(([key,w])=>({key,title:w.title,qty:w.qty,room:w.room,due:Math.max(w.due,t0),late:w.due<t0})).filter(x=>x.due>=ws&&x.due<ws+7*DAY);
+  const t0=today0(),jobs=db.weekly.filter(j=>!mine||!j.who||j.who===me);
+  const plan=weekPlan(ws);
   db.weeklyDone.filter(x=>x.plan&&x.wk===wk&&!plan.some(p=>p.key===x.key)).forEach(x=>plan.push({key:x.key,title:x.title,qty:x.qty,room:x.room,due:ws+x.day*DAY,gone:true}));
-  plan.forEach(x=>x.done=db.weeklyDone.find(d=>d.id==='plan:'+x.key));WK.items=plan;
+  plan.forEach(x=>x.done=db.weeklyDone.find(d=>d.id==='plan:'+x.key)||(x.auto?{op:'',t:0,auto:true}:null));WK.items=plan;WK.ws=ws;
   const all=jobs.length+plan.length,done=jobs.filter(j=>wkDone(j.id,wk)).length+plan.filter(x=>x.done).length;
   const col=i=>{const dj=jobs.filter(j=>j.day===i),dp=plan.filter(t=>Math.floor((t.due-ws)/DAY)===i).sort((a,b)=>a.due-b.due),d=ws+i*DAY;
     return `<div class="card" style="margin:0;${i===today?'border-color:var(--acc2)':''}"><div class="row" style="margin:0;justify-content:space-between"><b>${WDAYS[i]}${i===today?' · today':''}</b><span class="small muted">${fmtDay(d)}</span></div>
@@ -1800,14 +1838,16 @@ function renderWeekly(){const el=$('weekly');if(!el)return;
        <div style="flex:1;${x?'opacity:.5;text-decoration:line-through':''}"><a href="#" style="color:var(--ink);text-decoration:none" onclick="wkEdit('${j.id}');return false">${esc(j.title)}</a>
        <div class="small muted">${[j.room&&ROLES[j.room]?ROLES[j.room].icon+' '+ROLES[j.room].name:'',j.who?'👤 '+esc(j.who):'',j.notes?esc(j.notes):'',x?'✓ '+esc(x.op||'')+' '+fmtDay(x.t):''].filter(Boolean).join(' · ')}</div></div></div>`}).join('')}
      ${dp.map(t=>`<div style="display:flex;gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" style="width:22px;height:22px;flex:none" ${t.done?'checked':''} onchange="wkPlanToggle(${WK.items.indexOf(t)},'${wk}')">
-       <div style="flex:1;${t.done?'opacity:.5;text-decoration:line-through':''}">${esc(t.title)}<div class="small muted">${[`<span class="tag">from Planning</span>`,t.late&&!t.done?'<span class="bad">overdue</span>':'',t.room&&ROLES[t.room]?ROLES[t.room].icon+' '+ROLES[t.room].name:'',t.qty?esc(t.qty):'',t.done?'✓ '+esc(t.done.op||'')+' '+fmtDay(t.done.t):''].filter(Boolean).join(' · ')}</div></div></div>`).join('')}
+       <div style="flex:1;${t.done?'opacity:.5;text-decoration:line-through':''}">${t.type==='inoc'&&!t.gone?`<a href="#" style="color:var(--acc2);font-weight:600" onclick="inocOpen(${WK.items.indexOf(t)});return false">${esc(t.title)} ▸</a>`:esc(t.title)}<div class="small muted">${[`<span class="tag">from Planning</span>`,t.late&&!t.done?'<span class="bad">overdue</span>':'',t.room&&ROLES[t.room]?ROLES[t.room].icon+' '+ROLES[t.room].name:'',t.type==='inoc'&&t.made!=null?`${t.made} of ${t.blocks} made`:t.qty?esc(t.qty):'',t.done?(t.done.auto?'✓ all made':'✓ '+esc(t.done.op||'')+' '+fmtDay(t.done.t)):''].filter(Boolean).join(' · ')}</div></div></div>`).join('')}
      ${!dj.length&&!dp.length?'<p class="small muted" style="margin:8px 0">Nothing set.</p>':''}
      <button class="chip" onclick="wkNew(${i})">+ Add</button></div>`};
   el.innerHTML=`<div class="row" style="justify-content:space-between;align-items:center">${back||'<span></span>'}
     <span class="chips"><button class="chip" onclick="WK.off--;renderWeekly()">← Prev</button><button class="chip ${WK.off===0?'on':''}" onclick="WK.off=0;renderWeekly()">This week</button><button class="chip" onclick="WK.off++;renderWeekly()">Next →</button>
     <button class="chip ${mine?'':'on'}" onclick="WK.mine=false;renderWeekly()">Everyone</button><button class="chip ${mine?'on':''}" onclick="WK.mine=true;renderWeekly()">Mine</button></span></div>
    <div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:center"><b style="font-size:18px">📅 Weekly production — week of ${fmtDay(ws)}</b><span class="muted">${done} of ${all} done</span></div>
-    <p class="small muted" style="margin:4px 0 0">Jobs repeat every week on their day; ticks start fresh each Monday. Items tagged <span class="tag">from Planning</span> come from your weekly targets. Click a job to edit or delete it.</p></div>
+    <p class="small muted" style="margin:4px 0 0">Jobs repeat every week on their day; ticks start fresh each Monday. Items tagged <span class="tag">from Planning</span> are the week's totals from your weekly targets, all on one production day:
+     <select style="padding:2px 6px;font-size:13px" onchange="db.settings.prodDay=+this.value;audit('Production day set to '+WDAYS[+this.value]);save();renderWeekly()">${WDAYS.map((d,i)=>`<option value="${i}" ${i===prodDay()?'selected':''}>${d}</option>`).join('')}</select>.
+     Click an <b>Inoculate</b> job to scan spawn and print labels.</p></div>
    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px">${[0,1,2,3,4,5,6].map(col).join('')}</div>`}
 
 /* ================= walk-in cooler =================
