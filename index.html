@@ -114,7 +114,7 @@ header .badge{background:#ffcf5c;color:#3a2a00}
   <nav id="nav">
     <button data-t="home" class="on">Home</button><button id="moreBtn" onclick="toggleMore()">More ▾<span id="taskBadge"></span></button><span id="moreNav"><button data-t="dash">Dashboard</button><button data-t="blocks">Blocks</button><button data-t="batches">Batches</button><button data-t="inventory">Inventory</button><button data-t="planning">Planning</button><button data-t="tasks">Tasks</button><button data-t="weekly">Weekly</button><button data-t="prep">Prep</button><button data-t="library">SOPs</button><button data-t="labels">Labels</button><button data-t="cooler">Walk-In</button><button data-t="purchases">Purchases</button><button data-t="settings">Settings</button></span>
   </nav>
-  <button id="opChip" class="chip" onclick="userMenu()" title="Signed in as"></button><button class="chip" onclick="activityDialog()">📋 Activity</button><button id="taskChip" class="chip" onclick="openTaskBoard()">✅ Tasks</button>
+  <button id="opChip" class="chip" onclick="userMenu()" title="Signed in as"></button><button id="actChip" class="chip" onclick="activityDialog()">📋 Activity</button><button id="taskChip" class="chip" onclick="openTaskBoard()">✅ Tasks</button>
   <input id="scanbox" placeholder="Scan or type a block ID…" autocomplete="off">
   <span id="addBtns" style="display:contents"><button class="btn alt" onclick="openNewCulture()">+ Add LC</button><button class="btn alt" onclick="openNewSpawn()">+ Add spawn</button><button class="btn" onclick="openNewBatch()">+ Add block batch</button></span>
 </header>
@@ -324,6 +324,7 @@ function renderHeader(){
   const pc=$('printerChip');pc.style.display=can('lab')&&ROLE?'':'none';pc.innerHTML=PRINTER==='bt'?(PH.ch&&PH.dev&&PH.dev.gatt.connected?'🖨 '+esc(PH.dev.name||'Printer')+' ✓':'🖨 Printer — tap to connect'):'🖨 Printer';if(!full&&moreOpen)toggleMore();
   const u=curUser();$('opChip').innerHTML=u?`👤 ${esc(u.name)}${u.admin?' · admin':''} ▾`:'👤 Sign in';
   const nu=db.tasks.filter(t=>t.status==='open'&&tierOf(t,true)==='urgent').length;$('taskBadge').innerHTML='';
+  $('actChip').style.display=isAdmin()?'':'none';
   $('taskChip').innerHTML=`✅ Tasks${nu?` <span class="badge">${nu}</span>`:''}`;$('taskChip').style.display=curUser()?'':'none';
 }
 /* ================= people, passwords & access =================
@@ -424,7 +425,8 @@ function removePerson(id){const p=people().find(x=>x.id===id);if(!p)return;if(p.
   if(!confirm(`Remove ${p.name}? They won't be able to sign in. Their past activity stays in the log.`))return;p.removed=true;syncOps();audit(`Removed person ${p.name}`);save();managePeople()}
 function whoDialog(){userMenu()}
 let actFilter='',actDay='all';
-function activityDialog(){
+const isAdmin=()=>{const u=curUser();return !!(u&&u.admin)};
+function activityDialog(){if(!isAdmin())return toast('Only admins can see the activity log');
   const people=[...new Set([...db.settings.operators,...db.log.map(l=>l.op).filter(Boolean)])],since=actDay==='today'?today0():actDay==='week'?Date.now()-7*DAY:0;
   const list=db.log.filter(l=>(!actFilter||l.op===actFilter)&&l.t>=since).slice().reverse().slice(0,400);
   const room=r=>ROLES[r]?`<span class="tag">${ROLES[r].icon} ${esc(ROLES[r].name.split(' ')[0])}</span>`:'';
@@ -1738,7 +1740,7 @@ function renderSettings(){setTimeout(()=>probeCheck(false),0);
    <div class="row"><button class="btn alt" onclick="probeCheck(true)">Test connection</button></div><pre id="probeTest" class="small" style="white-space:pre-wrap;max-height:260px;overflow:auto;display:none"></pre></div>
   <div class="card"><b>Environmental sensors</b><p class="small muted">Import readings as CSV with columns: <code>timestamp,sensor_id,zone,measurement,value,unit,quality</code> (zone = room name). Readings are linked to blocks through their location history and shown on each block record. ${db.sensorReadings.length} readings stored.</p>
    <div class="row"><label class="btn alt" style="margin:0;color:var(--ink)">Import sensor CSV<input type="file" accept=".csv,text/csv" style="display:none" onchange="importSensors(this.files[0])"></label>${db.sensorReadings.length?`<button class="btn alt" onclick="if(confirm('Delete all sensor readings?')){db.sensorReadings=[];save();renderSettings()}">Clear readings</button>`:''}</div></div>
-  <div class="card"><b>Activity log</b><table>${db.log.slice(-25).reverse().map(l=>`<tr><td class="muted small" style="white-space:nowrap">${fmtDate(l.t)}</td><td class="small">${esc(l.op)}</td><td class="small">${esc(l.msg)}</td></tr>`).join('')}</table></div>`;
+  ${isAdmin()?`<div class="card"><b>Activity log</b><table>${db.log.slice(-25).reverse().map(l=>`<tr><td class="muted small" style="white-space:nowrap">${fmtDate(l.t)}</td><td class="small">${esc(l.op)}</td><td class="small">${esc(l.msg)}</td></tr>`).join('')}</table></div>`:''}`;
 }
 /* ================= weekly production =================
    Jobs that repeat every week on a set day (e.g. "Monday — pasteurize substrate"). Each week starts fresh:
@@ -1988,7 +1990,7 @@ function markHotkeys(){
   const ctx=dlgOpen?[k('Enter','Save'),k('Esc','Close')]
     :[station.block||station.spawn||station.culture?k('Esc','Done'):'',k('/','Type an ID'),
       can('lab')?k('B','Block batch')+k('S','Spawn')+k('L','LC'):'',can('prep')&&ROLE!=='all'?k('R','Start run'):'',
-      can('harvest')&&$('wt')?k('T','Tare'):'',k('A','Activity'),k('K','Tasks'),k('M','Room')].filter(Boolean);
+      can('harvest')&&$('wt')?k('T','Tare'):'',isAdmin()?k('A','Activity'):'',k('K','Tasks'),k('M','Room')].filter(Boolean);
   bar.innerHTML=`<b style="color:var(--ink)">⌨</b>${nums.length?nums.join('')+'<span class="sep"></span>':''}${ctx.join('')}<span class="k"><kbd>?</kbd>All keys</span><button class="x" onclick="setKeybar(false)" title="Hide the key guide">Hide ✕</button>`;
 }
 const hkLater=()=>setTimeout(markHotkeys,0);
@@ -2003,7 +2005,7 @@ const HK=[
   ['/','Jump to the scan box (type an ID)',()=>true],
   ['B','Add block batch',()=>can('lab')],['S','Add spawn',()=>can('lab')],['L','Add LC (liquid culture)',()=>can('lab')],
   ['R','Start a sterilize / pasteurize run',()=>can('prep')],['P','Printer setup',()=>can('lab')],
-  ['T','Tare the scale',()=>can('harvest')],['K','Task board',()=>true],['O','SOPs & recipes',()=>true],['A','Activity log',()=>true],['W','Who is using this device',()=>true],
+  ['T','Tare the scale',()=>can('harvest')],['K','Task board',()=>true],['O','SOPs & recipes',()=>true],['A','Activity log',()=>isAdmin()],['W','Who is using this device',()=>true],
   ['M','Change this device\'s room',()=>true],['H','Home',()=>true],['?','Show this list',()=>true]];
 function hkHelp(){dlg(`<h3 style="margin-top:0">⌨ Keyboard shortcuts</h3><table>${HK.filter(h=>h[2]()).map(([k,d])=>`<tr><td style="width:90px"><kbd>${k}</kbd></td><td>${d}</td></tr>`).join('')}</table>
   <p class="small muted">Shortcuts don't fire while you're typing in a box, and scanner input is never mistaken for a shortcut.</p><div class="row"><button class="btn alt" onclick="closeDlg()">Close</button></div>`)}
@@ -2021,7 +2023,7 @@ function runHotkey(k){
   if(K==='r'&&can('prep'))return openNewCycle();
   if(K==='p'&&can('lab'))return printerSetup();
   if(K==='t'&&can('harvest')&&tab==='home'&&$('wt')){scale.tare=scale.raw||0;renderHome();return toast('Scale tared')}
-  if(K==='a')return activityDialog();
+  if(K==='a'&&isAdmin())return activityDialog();
   if(K==='k')return openTaskBoard();
   if(K==='o')return openLibrary();
   if(K==='w')return whoDialog();
