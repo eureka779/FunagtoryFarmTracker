@@ -442,10 +442,27 @@ function activityDialog(){if(!isAdmin())return toast('Only admins can see the ac
      return h+`<tr><td class="small muted" style="white-space:nowrap">${new Date(l.t).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</td><td class="small" style="white-space:nowrap"><b>${esc(l.op||'—')}</b> ${room(l.room)}</td><td class="small">${esc(l.msg)}</td></tr>`}).join('')||'<tr><td class="muted">Nothing here yet.</td></tr>'}</table></div>
    <div class="row"><button class="btn alt" onclick="closeDlg()">Close</button></div>`);
 }
-function setMode(t,arg){if(t==='stage'||t==='loc'){mode={type:t,arg};render();return}mode={type:'lookup'};station.block=null;show('home')}
+function setMode(t,arg){if(t==='stage'||t==='loc'||t==='contam'){if(t==='contam')CONTAM=[];mode={type:t,arg};render();return}mode={type:'lookup'};station.block=null;show('home')}
+let CONTAM=[];
 function renderMode(){const m=mode.type;
+  if(m==='contam'){$('modebar').innerHTML=`<span class="pill r">☣ Scanning marks blocks CONTAMINATED</span>${CONTAM.length?` <span class="small">Marked: ${CONTAM.map(x=>esc(x.id)).join(', ')}</span> <button class="chip" onclick="contamUndo()">Undo last</button>`:''} <button class="chip" onclick="mode={type:'lookup'};render()">Stop</button>`;return}
   $('modebar').innerHTML=(m==='stage'||m==='loc')?`<span class="pill a">Scanning moves blocks ${m==='stage'?'→ ':'to '}${esc(mode.arg)}</span> <button class="chip" onclick="mode={type:'lookup'};render()">Stop</button>`:'';
 }
+/* Contamination card: every block scanned is closed as contaminated (spawn bags and LC jars are marked contaminated). */
+function contamScan(id){const b=db.blocks[id];if($('dlg').open)closeDlg();
+  if(b){if(b.stage==='Closed'){beep(250);return toast(`${id} is already closed${b.closure?' ('+b.closure.reason+')':''}`)}
+    CONTAM.push({kind:'block',id,stage:b.stage,contam:b.contam.length,hist:b.stageHist.length,final:b.finalWeight});
+    doClose(b,null,'Contaminated',Date.now(),'Scanned with the Contaminated card');beep(330);toast(`☣ ${id} closed — contaminated`);return render()}
+  if(db.spawnBags[id]){const sb=db.spawnBags[id];if(sb.stage==='Contaminated'){beep(250);return toast(`${id} is already contaminated`)}
+    CONTAM.push({kind:'spawn',id,stage:sb.stage});spawnStage(id,'Contaminated');beep(330);return render()}
+  if(db.cultureJars[id]){const j=db.cultureJars[id];if(j.stage==='Contaminated'){beep(250);return toast(`${id} is already contaminated`)}
+    CONTAM.push({kind:'lc',id,stage:j.stage});cultureStage(id,'Contaminated');beep(330);return render()}
+  beep(250);toast('Unknown ID: '+id)}
+function contamUndo(){const x=CONTAM.pop();if(!x)return;
+  if(x.kind==='block'){const b=db.blocks[x.id];if(b){b.closure=null;b.finalWeight=x.final;b.contam.length=x.contam;b.stageHist.length=x.hist;b.stage=x.stage}}
+  else if(x.kind==='spawn'){const sb=db.spawnBags[x.id];if(sb){sb.stage=x.stage;sb.stageHist.pop()}}
+  else if(x.kind==='lc'){const j=db.cultureJars[x.id];if(j){j.stage=x.stage;j.stageHist.pop()}}
+  audit(`Undid contamination on ${x.id}`);save();toast(`${x.id} put back to ${x.stage}`);render()}
 function askLoc(){const v=prompt('Location as Room / Rack / Shelf',(db.settings.rooms[0]||'Room')+' / 1 / 1');if(v&&v.trim())setMode('loc',v.trim())}
 
 /* ================= scanner ================= */
@@ -465,11 +482,13 @@ function handleScan(raw){
     if(a==='MODE')setMode('lookup');
     else if(a==='STAGE'){const s=STAGES.find(x=>x.toUpperCase()===arg.toUpperCase());if(s)setMode('stage',s)}
     else if(a==='LOC')setMode('loc',arg);
+    else if(a==='CONTAM'){setMode('contam');toast('Contamination mode — scan each contaminated block. Scan "Clear / home" or tap Stop when done.')}
     else if(a==='RECORD')stationRecord();
     else if(a==='CONTINUE')decide('continue');else if(a==='RECOVER')decide('recover');else if(a==='CLOSE')decide('close');
     return;
   }
   const id=normId(code),b=db.blocks[id];
+  if(mode.type==='contam')return contamScan(id);
   if(!b&&db.spawnBags[id]){if($('dlg').open)closeDlg();beep();goSpawn(id);const sb=db.spawnBags[id];
     if(ROLE==='lab'&&QUICK_SPAWN&&(sb.stage==='Colonizing'||sb.stage==='Ready'))quickBatch(id);return}
   if(!b&&db.cultureJars[id]){if($('dlg').open)closeDlg();beep();return goCulture(id)}
@@ -581,7 +600,7 @@ function openClose(id){
   <label>Notes<textarea id="cl_n"></textarea></label>
   <div class="row"><button class="btn danger" onclick="const b=db.blocks['${id}'],w=+$('cl_w').value;doClose(b,w>0?wIn(w):null,$('cl_r').value,(pdate($('cl_d').value)||Date.now())+new Date().getHours()*36e5,$('cl_n').value);closeDlg();if(station.block==='${id}'){station.block=null;station.decision=false}render()">Close block</button><button class="btn alt" onclick="closeDlg()">Cancel</button></div>`);
 }
-function goBlock(id){station.spawn=null;station.culture=null;station.block=id;station.decision=false;station.finishing=false;armed=true;if(mode.type!=='stage'&&mode.type!=='loc')mode={type:'harvest'};show('home')}
+function goBlock(id){station.spawn=null;station.culture=null;station.block=id;station.decision=false;station.finishing=false;armed=true;if(mode.type!=='stage'&&mode.type!=='loc'&&mode.type!=='contam')mode={type:'harvest'};show('home')}
 function addBlocks(bt){const made=[];let id;while((id=nextNewId(bt))){const b=newBlock(bt,id);if(bt.blockWeight!=null){b.startWeight=bt.blockWeight;b.startT=Date.now()}made.push(id)}return made}
 function startWeighing(id){station.batch=id;station.block=null;station.last=null;station.decision=false;station.finishing=false;armed=true;show('home')}
 function saveStart(id){const b=db.blocks[id],g=net();if(!(g>0))return toast('Put the block on the scale first');
@@ -653,7 +672,7 @@ function idleCard(){
   return `<div class="card" style="text-align:center;padding:44px 16px">${inner}<p class="small muted hk-hint" style="margin:18px 0 0">⌨ Press <kbd>?</kbd> for keyboard shortcuts</p></div>`;
 }
 function renderHome(){
-  if(mode.type!=='stage'&&mode.type!=='loc')mode={type:station.block?'harvest':'lookup'};station.batch=null;
+  if(mode.type!=='stage'&&mode.type!=='loc'&&mode.type!=='contam')mode={type:station.block?'harvest':'lookup'};station.batch=null;
   if(station.block&&!db.blocks[station.block])station.block=null;if(station.batch&&!db.batches[station.batch])station.batch=null;
   const b=db.blocks[station.block],sb=!b&&db.spawnBags[station.spawn],cj=!b&&!sb&&db.cultureJars[station.culture];
   if(!ROLE&&curUser()){loginShow('room',curUser().id);return}
@@ -809,7 +828,7 @@ function createBatch(){
 /* ================= spawn bags ================= */
 const SPAWN_STAGES=['Colonizing','Ready','Used','Contaminated'];
 function batchDefault(S){const d=((db.settings.batchDefaults||{})[S])||{};return {n:d.n||25,w:d.w!=null?d.w:db.settings.lastBlockW??null}}
-function goSpawn(id){station.culture=null;station.spawn=id;station.block=null;station.decision=false;station.finishing=false;if(mode.type!=='stage'&&mode.type!=='loc')mode={type:'lookup'};show('home')}
+function goSpawn(id){station.culture=null;station.spawn=id;station.block=null;station.decision=false;station.finishing=false;if(mode.type!=='stage'&&mode.type!=='loc'&&mode.type!=='contam')mode={type:'lookup'};show('home')}
 function deductSpawn(sb){const l=db.spawn.find(x=>x.id===sb.lotId);if(l&&l.bagWeight&&!sb.deducted){l.remaining=Math.max(0,(l.remaining??l.qty)-l.bagWeight/1000);sb.deducted=true}}
 function spawnStage(id,s){const b=db.spawnBags[id];if(b.stage===s)return;b.stage=s;b.stageHist.push({stage:s,t:Date.now(),op:op()});if(s==='Contaminated')deductSpawn(b);audit(`Spawn ${id} → ${s}`);save();ok();toast(`${id} → ${s}`);renderHome()}
 function spawnLotBags(lot){const bs=Object.values(db.spawnBags).filter(b=>b.lotId===lot);if(!bs.length)return '—';const c={};bs.forEach(b=>c[b.stage]=(c[b.stage]||0)+1);return SPAWN_STAGES.filter(x=>c[x]).map(x=>`${c[x]} ${x.toLowerCase()}`).join(', ')}
@@ -898,7 +917,7 @@ function quickSpawn(jarId){
 
 /* ---------- liquid cultures ---------- */
 const LC_STAGES=['Growing','Ready','Empty','Contaminated'];
-function goCulture(id){station.culture=id;station.spawn=null;station.block=null;station.decision=false;station.finishing=false;if(mode.type!=='stage'&&mode.type!=='loc')mode={type:'lookup'};show('home')}
+function goCulture(id){station.culture=id;station.spawn=null;station.block=null;station.decision=false;station.finishing=false;if(mode.type!=='stage'&&mode.type!=='loc'&&mode.type!=='contam')mode={type:'lookup'};show('home')}
 function cultureLabel(id){const j=db.cultureJars[id],c=db.cultures.find(x=>x.id===j.lotId)||{};
   return {code:id,title:id,lines:[{t:'LC',s:0.12,b:true},{t:[c.species,c.strain].filter(Boolean).join(' '),s:0.15,b:true,wrap:true},{t:'Made '+fmtDay(pdate(c.date)),s:0.11}]}}
 function printCulture(ids){ids=ids.filter(i=>db.cultureJars[i]);ids.forEach(i=>db.cultureJars[i].labelPrints=(db.cultureJars[i].labelPrints||0)+1);save();printItems(ids.map(cultureLabel))}
@@ -1215,10 +1234,10 @@ function planWant(){
     const ready=pdate(bt.inocDate)+param(vKey(bt.species,bt.strain)in db.lead?vKey(bt.species,bt.strain):bt.species,'incub').v*DAY;
     if(ready<=t0+2*DAY)add(`fruit|${bt.id}`,{type:'fruit',S:vKey(bt.species,bt.strain),batch:bt.id,blocks:bl.length,due:ready})});
   return want}
-/* The farm's production rhythm: substrate (pasteurization) on set weekdays, inoculation a set number of
+/* The farm's production rhythm: substrate (pasteurization) on set weekdays (Monday by default), inoculation a set number of
    days later. Planned jobs are added up per variety and put on those days. */
 const PLAN_ORDER=['culture','spawn','spawnstock','substrate','inoc','fruit'];
-const subDays=()=>{const d=db.settings.subDays;return Array.isArray(d)&&d.length?d:[0,3]};
+const subDays=()=>{const d=db.settings.subDays;return Array.isArray(d)&&d.length?d:[0]};
 const inocOff=()=>{const n=+db.settings.inocOffset;return n>=0&&n<=6?n:2};
 const day0=t=>{const d=new Date(t);d.setHours(0,0,0,0);return d.getTime()};
 const isSub=t=>subDays().includes((new Date(t).getDay()+6)%7);
@@ -1725,7 +1744,7 @@ let labelSel='';
 function labelItemsFor(sel){
   if(sel==='actions')return [{code:'ACT:MODE:LOOKUP',title:'Clear / home',lines:['Back to scan screen']},
     ...STAGES.filter(s=>s!=='Closed').map(s=>({code:'ACT:STAGE:'+s.toUpperCase(),title:'→ '+s,lines:['Move scanned blocks']})),
-    {code:'ACT:RECORD',title:'Record',lines:['Save current weight']},{code:'ACT:CONTINUE',title:'Continue flush',lines:['After a harvest']},{code:'ACT:RECOVER',title:'Recovery',lines:['Next flush']},{code:'ACT:CLOSE',title:'Close out',lines:['After a harvest']}];
+    {code:'ACT:CONTAM',title:'Contaminated',lines:['Scan this, then scan','each contaminated block']},{code:'ACT:RECORD',title:'Record',lines:['Save current weight']},{code:'ACT:CONTINUE',title:'Continue flush',lines:['After a harvest']},{code:'ACT:RECOVER',title:'Recovery',lines:['Next flush']},{code:'ACT:CLOSE',title:'Close out',lines:['After a harvest']}];
   if(sel==='locations'){const out=[],rk=+($('lr')?.value||0),sh=+($('ls')?.value||0);db.settings.rooms.forEach(r=>{if(!rk)out.push({code:'ACT:LOC:'+r,title:r,lines:['Location']});for(let i=1;i<=rk;i++){if(!sh)out.push({code:`ACT:LOC:${r}/${i}`,title:`${r} · Rack ${i}`,lines:['Location']});for(let j=1;j<=sh;j++)out.push({code:`ACT:LOC:${r}/${i}/${j}`,title:`${r} R${i} S${j}`,lines:['Location']})}});return out}
   if(sel.startsWith('culture:'))return Object.values(db.cultureJars).filter(j=>j.lotId===sel.slice(8)).map(j=>cultureLabel(j.id));
   if(sel.startsWith('spawn:'))return Object.values(db.spawnBags).filter(b=>b.lotId===sel.slice(6)).map(b=>spawnLabel(b.id));
