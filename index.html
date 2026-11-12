@@ -1234,29 +1234,41 @@ function planWant(){
     const ready=pdate(bt.inocDate)+param(vKey(bt.species,bt.strain)in db.lead?vKey(bt.species,bt.strain):bt.species,'incub').v*DAY;
     if(ready<=t0+2*DAY)add(`fruit|${bt.id}`,{type:'fruit',S:vKey(bt.species,bt.strain),batch:bt.id,blocks:bl.length,due:ready})});
   return want}
-/* The farm's production rhythm: substrate (pasteurization) on set weekdays (Monday by default), inoculation a set number of
-   days later. Planned jobs are added up per variety and put on those days. */
+/* The farm's production rhythm. Each kind of work has its own weekdays (0 = Monday):
+   culture work (LC jars), substrate (pasteurization) and inoculation (blocks, and making spawn bags).
+   Planned jobs are added up across varieties and put on the latest allowed day that still meets the plan. */
 const PLAN_ORDER=['culture','spawn','spawnstock','substrate','inoc','fruit'];
-const subDays=()=>{const d=db.settings.subDays;return Array.isArray(d)&&d.length?d:[0]};
-const inocOff=()=>{const n=+db.settings.inocOffset;return n>=0&&n<=6?n:2};
+const DAYKINDS={cul:{set:'cultureDays',def:[1],name:'Culture days'},sub:{set:'subDays',def:[0],name:'Substrate days'},inoc:{set:'inocDays',def:[2],name:'Inoculation days'}};
+const workDays=k=>{const d=db.settings[DAYKINDS[k].set];return Array.isArray(d)&&d.length?d:DAYKINDS[k].def};
+const subDays=()=>workDays('sub');
+const bagsPerJar=()=>Math.max(1,+db.settings.bagsPerJar||25);
 const day0=t=>{const d=new Date(t);d.setHours(0,0,0,0);return d.getTime()};
-const isSub=t=>subDays().includes((new Date(t).getDay()+6)%7);
-function subOnOrBefore(t){let d=day0(t);for(let k=0;k<14;k++,d=day0(d-DAY/2))if(isSub(d))return d;return day0(t)}
-function subOnOrAfter(t){let d=day0(t);for(let k=0;k<14;k++,d=day0(d+DAY*1.5))if(isSub(d))return d;return day0(t)}
-/* Substrate day for a job due at `due` (for inoculation: the substrate day whose inoculation day is on or before it). */
-function subFor(due,inoc){const t0=today0();let s=subOnOrBefore(due-(inoc?inocOff()*DAY:0)),late=false;if(s<t0){s=subOnOrAfter(t0);late=true}return {s,late}}
+const isDay=(k,t)=>workDays(k).includes((new Date(t).getDay()+6)%7);
+function dayOnOrBefore(k,t){let d=day0(t);for(let n=0;n<14;n++,d=day0(d-DAY/2))if(isDay(k,d))return d;return day0(t)}
+function dayOnOrAfter(k,t){let d=day0(t);for(let n=0;n<14;n++,d=day0(d+DAY*1.5))if(isDay(k,d))return d;return day0(t)}
+/* Latest allowed day on or before `due`; if that has passed, the next allowed day (marked late). */
+function slotFor(k,due){const t0=today0();let d=dayOnOrBefore(k,due),late=false;if(d<t0){d=dayOnOrAfter(k,t0);late=true}return {d,late}}
+/* An inoculation and the substrate day before it. */
+function inocSlot(due){const t0=today0();let {d,late}=slotFor('inoc',due),s=dayOnOrBefore('sub',d-DAY);
+  if(s<t0){s=dayOnOrAfter('sub',t0);late=true;if(d<=s)d=dayOnOrAfter('inoc',s+DAY)}return {inoc:d,sub:s,late}}
+function setWorkDay(k,i,on){const d=workDays(k).filter(x=>x!==i);if(on)d.push(i);if(!d.length)return toast('Keep at least one day');db.settings[DAYKINDS[k].set]=d.sort();audit(DAYKINDS[k].name+': '+d.map(x=>WDAYS[x]).join(', '));save();renderWeekly()}
 function weekPlan(ws){const t0=today0(),agg={},pl=n=>n===1?'':'s',bag=spawnRatio().lb;
   Object.entries(planWant()).forEach(([k,w])=>{
     if(w.type==='fruit'){const due=Math.max(w.due,t0);if(weekStart(due)===ws)agg[k]={key:k,type:'fruit',S:w.S,blocks:w.blocks,batch:w.batch,due,late:w.due<t0,parts:{}};return}
-    const {s,late}=subFor(w.due,w.type==='inoc'),due=w.type==='inoc'?s+inocOff()*DAY:s;if(weekStart(due)!==ws)return;
+    let due,late,s=null;
+    if(w.type==='inoc'||w.type==='substrate'||w.type==='spawnstock'){const x=inocSlot(w.inocDue||w.due);s=x.sub;due=w.type==='inoc'?x.inoc:x.sub;late=x.late}
+    else{const x=slotFor(w.type==='culture'?'cul':'inoc',w.due);due=x.d;late=x.late}
+    if(weekStart(due)!==ws)return;
     /* one job per type and day, with every variety added together */
     const key=`${w.type}|${dstr(due)}`,a=agg[key]=agg[key]||{key,type:w.type,blocks:0,bags:0,due,sub:s,late:false,parts:{}};
     a.blocks+=w.blocks;a.bags+=w.bags;if(late)a.late=true;const pt=a.parts[w.S]=a.parts[w.S]||{blocks:0,bags:0};pt.blocks+=w.blocks;pt.bags+=w.bags});
-  const out=Object.values(agg).map(a=>{a.title={culture:`Begin culture work (for ${a.blocks} blocks)`,spawn:`Make ${a.bags} spawn bag${pl(a.bags)} (${bag} lb each, for ${a.blocks} blocks)`,
+  const out=Object.values(agg).map(a=>{if(a.type==='culture'){a.jars=0;Object.values(a.parts).forEach(pt=>{pt.jars=Math.ceil(pt.bags/bagsPerJar());a.jars+=pt.jars})}
+    a.title={culture:`Make ${a.jars} LC jar${pl(a.jars)} (for ${a.bags} spawn bag${pl(a.bags)})`,spawn:`Make ${a.bags} spawn bag${pl(a.bags)} (${bag} lb each, for ${a.blocks} blocks)`,
       spawnstock:`Set aside ${a.bags} spawn bag${pl(a.bags)} from stock (for ${a.blocks} blocks)`,substrate:`Pasteurize substrate for ${a.blocks} blocks`,
       inoc:`Inoculate ${a.blocks} blocks`,fruit:`Move batch ${a.batch} (${a.blocks} ${a.S}) into fruiting`}[a.type];
     a.qty=a.type==='spawn'||a.type==='spawnstock'?a.bags+' bag'+pl(a.bags):a.blocks+' blocks';a.room={culture:'lab',spawn:'lab',spawnstock:'lab',substrate:'prep',inoc:'lab',fruit:'grow'}[a.type];
-    a.vars=Object.keys(a.parts);a.detail=a.vars.map(S=>`${S}: ${a.type==='spawn'||a.type==='spawnstock'?a.parts[S].bags+' bag'+pl(a.parts[S].bags):a.parts[S].blocks+' blocks'}`).join(' · ');return a});
+    a.vars=Object.keys(a.parts);a.detail=a.vars.map(S=>`${S}: ${a.type==='culture'?a.parts[S].jars+' jar'+pl(a.parts[S].jars):a.type==='spawn'||a.type==='spawnstock'?a.parts[S].bags+' bag'+pl(a.parts[S].bags):a.parts[S].blocks+' blocks'}`).join(' · ');
+    if(a.type==='culture')a.qty=a.jars+' jar'+pl(a.jars);return a});
   /* blocks of the planned varieties made this week fill the week's inoculation jobs, earliest first */
   const inocs=out.filter(x=>x.type==='inoc').sort((x,y)=>x.due-y.due);
   if(inocs.length){const vars=[...new Set(inocs.flatMap(x=>x.vars))];let left=inocMadeAny(vars,Math.min(ws,day0(inocs[0].due-(inocs[0].late?7:6)*DAY)),ws+7*DAY);inocs.forEach(x=>x.from=Math.min(ws,day0(inocs[0].due-(inocs[0].late?7:6)*DAY)));
@@ -1266,7 +1278,6 @@ function weekPlan(ws){const t0=today0(),agg={},pl=n=>n===1?'':'s',bag=spawnRatio
 function inocMadeAny(vars,from,to){return Object.values(db.batches).filter(bt=>{const t=pdate(bt.inocDate);return t>=from&&t<to&&vars.some(S=>vMatch(S,bt.species,bt.strain))}).reduce((n,bt)=>n+batchBlocks(bt.id).length,0)}
 /* Blocks of this variety inoculated between two dates (any batch). */
 function inocMade(S,from,to){return Object.values(db.batches).filter(bt=>{const t=pdate(bt.inocDate);return t>=from&&t<to&&vMatch(S,bt.species,bt.strain)}).reduce((n,bt)=>n+batchBlocks(bt.id).length,0)}
-function setSubDay(i,on){const d=subDays().filter(x=>x!==i);if(on)d.push(i);if(!d.length)return toast('Keep at least one substrate day');db.settings.subDays=d.sort();audit('Substrate days: '+d.map(x=>WDAYS[x]).join(', '));save();renderWeekly()}
 /* Older versions copied planned production onto the task board. Take those copies off it; any the
    person edited by hand become ordinary tasks. */
 function genTasks(){if(!db.tasks.some(t=>t.auto))return;db.tasks.forEach(t=>{if(t.auto&&t.custom){t.auto=false;t.key=undefined}});db.tasks=db.tasks.filter(t=>!t.auto);save()}
@@ -1883,8 +1894,8 @@ function renderWeekly(){const el=$('weekly');if(!el)return;
     <button class="chip ${mine?'':'on'}" onclick="WK.mine=false;renderWeekly()">Everyone</button><button class="chip ${mine?'on':''}" onclick="WK.mine=true;renderWeekly()">Mine</button></span></div>
    <div class="card"><div class="row" style="margin:0;justify-content:space-between;align-items:center"><b style="font-size:18px">📅 Weekly production — week of ${fmtDay(ws)}</b><span class="muted">${done} of ${all} done</span></div>
     <p class="small muted" style="margin:4px 0 0">Jobs repeat every week on their day; ticks start fresh each Monday. Items tagged <span class="tag">from Planning</span> are totals from your weekly targets, put on your production days. Click an <b>Inoculate</b> job to scan spawn and print labels.</p>
-    <div class="row" style="align-items:center;margin-top:6px"><span class="small"><b>Substrate days:</b></span><span class="chips">${WDAYS.map((d,i)=>`<button class="chip ${subDays().includes(i)?'on':''}" onclick="setSubDay(${i},${!subDays().includes(i)})">${d.slice(0,3)}</button>`).join('')}</span>
-     <span class="small"><b>Inoculate</b> <select style="padding:2px 6px;font-size:13px" onchange="db.settings.inocOffset=+this.value;audit('Inoculation set to '+this.value+' days after substrate');save();renderWeekly()">${[0,1,2,3,4,5,6].map(n=>`<option value="${n}" ${n===inocOff()?'selected':''}>${n}</option>`).join('')}</select> days after → ${subDays().map(i=>WDAYS[(i+inocOff())%7].slice(0,3)).join(' & ')}</span></div></div>
+    ${Object.entries(DAYKINDS).map(([k,v])=>`<div class="row" style="align-items:center;margin:6px 0 0"><span class="small" style="min-width:120px"><b>${v.name}:</b></span><span class="chips">${WDAYS.map((d,i)=>`<button class="chip ${workDays(k).includes(i)?'on':''}" onclick="setWorkDay('${k}',${i},${!workDays(k).includes(i)})">${d.slice(0,3)}</button>`).join('')}</span></div>`).join('')}
+    <div class="row" style="align-items:center;margin:6px 0 0"><span class="small">One LC jar inoculates <input type="number" min="1" step="1" value="${bagsPerJar()}" style="width:64px;padding:2px 6px" onchange="db.settings.bagsPerJar=Math.max(1,Math.round(+this.value)||25);audit('LC jar inoculates '+db.settings.bagsPerJar+' spawn bags');save();renderWeekly()"> spawn bags (${spawnRatio().lb} lb).</span></div></div>
    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px">${[0,1,2,3,4,5,6].map(col).join('')}</div>`}
 
 /* ================= walk-in cooler =================
