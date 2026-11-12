@@ -1131,7 +1131,7 @@ function forecast(S){
     const blocks=Math.ceil(gap/y1e),inoc=w.ws+2*DAY-lead1;
     if(inoc<t0){w.late=true;flags.push(`${esc(S)}, week of ${fmtDay(w.ws)}: short ${fmtW(gap)} and too late to inoculate (would have needed ${fmtDay(inoc)})`);continue}
     const p={S,week:w.ws,blocks,inoc,prep:inoc-DAY,spawn:inoc-L.spawnDays*DAY,culture:inoc-(+L.spawnDays+ +L.cultureDays)*DAY,spawnG:blocks*L.spawnPer,flags:[]};
-    if(p.spawn<t0){if(stock>=p.spawnG)stock-=p.spawnG;else{p.flags.push('not enough spawn in stock and too late to make more');flags.push(`${esc(S)}: inoculating ${blocks} blocks by ${fmtDay(inoc)} needs ${r1(p.spawnG/1000)} kg spawn — only ${r1(stock/1000)} kg unallocated`);stock=0}}
+    if(p.spawn<t0){if(stock>=p.spawnG)stock-=p.spawnG;else{p.flags.push('not enough spawn in stock and too late to make more');flags.push(`${esc(S)}: inoculating ${blocks} blocks by ${fmtDay(inoc)} needs ${fmtW(p.spawnG)} spawn — only ${fmtW(stock)} unallocated`);stock=0}}
     else if(p.culture<t0&&!db.cultures.some(c=>vMatch(S,c.species,c.strain)&&c.status!=='Retired')){p.flags.push('no active culture lot');flags.push(`${esc(S)}: spawn must start ${fmtDay(p.spawn)} but there is no active culture lot`)}
     plans.push(p);w.plan=p;let t=w.ws+2*DAY;for(let f=0;f<3;f++){if(ys[f]>0)bucket(t,blocks*ys[f]*(1-fail),'planned');t+=betw*DAY}
   }
@@ -1174,7 +1174,7 @@ function renderPlanning(){
    ${f.weeks.map(w=>`<tr><td>${fmtDay(w.ws)}</td><td class="n">${fmtW(w.target)}</td><td class="n">${w.normal||w.addl?fmtW(w.normal)+(w.addl?` +${fmtW(w.addl)} extra`:''):'—'}</td><td class="n">${fmtW(w.demand)}</td><td class="n">${fmtW(w.existing)}${w.existing?` <span class="muted small">±${fmtW(w.existing*f.unc)}</span>`:''}</td><td class="n">${w.planned?fmtW(w.planned):'—'}</td>
      <td class="n ${w.late||w.net<-1?'bad':w.demand?'good':''}">${w.late?'Short '+fmtW(-w.net):w.net<-1?'Short '+fmtW(-w.net):w.demand?'+'+fmtW(w.net):'—'}</td>
      <td>${w.plan?`<b>${w.plan.blocks} blocks</b> by ${fmtDay(w.plan.inoc)}${w.plan.flags.length?` <span class="bad">⚠ ${esc(w.plan.flags.join(', '))}</span>`:''}`:''}</td>
-     <td class="small">${w.plan?`Culture ${fmtDay(w.plan.culture)} · Spawn ${fmtDay(w.plan.spawn)} (${r1(w.plan.spawnG/1000)} kg) · Substrate ${fmtDay(w.plan.prep)}`:''}</td></tr>`).join('')}</table></div></div>`).join('')||'<div class="card muted">Add a variety below (set a weekly target) to see a forecast.</div>'}
+     <td class="small">${w.plan?`Culture ${fmtDay(w.plan.culture)} · Spawn ${fmtDay(w.plan.spawn)} (${fmtW(w.plan.spawnG)}) · Substrate ${fmtDay(w.plan.prep)}`:''}</td></tr>`).join('')}</table></div></div>`).join('')||'<div class="card muted">Add a variety below (set a weekly target) to see a forecast.</div>'}
   <div class="card"><b>Weekly targets &amp; lead times per variety</b><p class="small muted">Lead times and yields here are starting assumptions. Once 3+ blocks have real data (5+ closed blocks for failure rate), measured averages replace them automatically.</p>
    <div class="scroll"><table><tr><th>Variety</th><th>Weekly target (${U()})</th><th>Incubation days</th><th>Fruit→1st harvest</th><th>Days between flushes</th><th>F1 / block (${U()})</th><th>F2</th><th>F3</th><th>Failure %</th><th>Spawn lead days</th><th>Culture lead days</th><th>Spawn per block (g)</th><th></th></tr>
    ${sp.map(S=>{const L=lead(S),v=vSplit(S),g=v.st!=null?(db.strains.find(x=>vMatch(S,x.species,x.strain))||{}).genetics:'',strs=v.st==null?db.strains.filter(x=>x.species===S).map(x=>x.strain).filter(Boolean):[];
@@ -1208,8 +1208,8 @@ function planWant(){
   const add=(k,w)=>{w.room=room(w.title);want[k]=w};
   planSpecies().forEach(S=>{const f=forecast(S);f.plans.forEach(p=>{const d=dstr(p.inoc),base=`${S}|${d}`;
     if(p.spawn>=t0){add(base+'|culture',{title:`Begin culture work for ${S} (for ${p.blocks} blocks inoculating ${fmtDay(p.inoc)})`,due:p.culture,qty:''});
-      add(base+'|spawn',{title:`Prepare & inoculate ${r1(p.spawnG/1000)} kg ${S} spawn`,due:p.spawn,qty:r1(p.spawnG/1000)+' kg'})}
-    else add(base+'|spawnstock',{title:`Set aside ${r1(p.spawnG/1000)} kg ${S} spawn from stock`,due:p.prep,qty:r1(p.spawnG/1000)+' kg'});
+      add(base+'|spawn',{title:`Prepare & inoculate ${fmtW(p.spawnG)} ${S} spawn`,due:p.spawn,qty:fmtW(p.spawnG)})}
+    else add(base+'|spawnstock',{title:`Set aside ${fmtW(p.spawnG)} ${S} spawn from stock`,due:p.prep,qty:fmtW(p.spawnG)});
     add(base+'|substrate',{title:`Prepare substrate & sterilize ${p.blocks} ${S} blocks`,due:p.prep,qty:p.blocks+' blocks'});
     add(base+'|inoc',{title:`Inoculate ${p.blocks} blocks of ${S}`,due:p.inoc,qty:p.blocks+' blocks'})})});
   Object.values(db.batches).forEach(bt=>{const bl=batchBlocks(bt.id).filter(b=>b.stage==='Inoculated'||b.stage==='Incubating');if(!bl.length)return;
