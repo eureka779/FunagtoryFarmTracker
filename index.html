@@ -291,7 +291,12 @@ function batchBlocks(id){return Object.values(db.blocks).filter(b=>b.batchId===i
 function idWidth(bt){return bt.count>99?3:2}
 function nextNewId(bt){const w=idWidth(bt);for(let i=1;i<=bt.count;i++){const id=`${bt.id}-${String(i).padStart(w,'0')}`;if(!db.blocks[id])return id}return null}
 function newBlock(bt,id){const t=pdate(bt.inocDate)||Date.now();return db.blocks[id]={id,batchId:bt.id,stage:'Inoculated',stageHist:[{stage:'Inoculated',t,op:op()}],loc:[],startWeight:null,startT:null,finalWeight:null,closure:null,flush:1,events:[],contam:[],notes:'',edits:[],labelPrints:0,created:Date.now()}}
-function speciesAll(){return [...new Set([...Object.values(db.batches).map(b=>b.species),...Object.keys(db.targets),...Object.keys(db.lead),...db.orders.map(o=>o.species)].filter(Boolean))].sort()}
+function speciesAll(){return [...new Set([...Object.values(db.batches).map(b=>b.species),...Object.keys(db.targets),...Object.keys(db.lead),...db.orders.map(o=>o.species)].filter(Boolean).map(v=>vSplit(v).sp))].sort()}
+/* A planning variety is either a species ("Blue Oyster" = every strain) or one strain ("Blue Oyster — Pearl"). */
+const VSEP=' — ';
+const vSplit=v=>{const i=String(v).indexOf(VSEP);return i<0?{sp:String(v),st:null}:{sp:String(v).slice(0,i),st:String(v).slice(i+VSEP.length)}};
+const vMatch=(v,sp,st)=>{const x=vSplit(v),lc=a=>String(a||'').trim().toLowerCase();return lc(x.sp)===lc(sp)&&(x.st==null||lc(x.st)===lc(st))};
+const vKey=(sp,st)=>st?sp+VSEP+st:sp;
 function lead(S){return Object.assign({},LEAD_DEFAULT,db.lead[S]||{})}
 
 /* ================= navigation ================= */
@@ -1070,7 +1075,7 @@ function perfTable(){
 
 /* ================= dashboard ================= */
 function renderDash(){
-  const bl=Object.values(db.blocks),w0=weekStart(Date.now()),fc=speciesAll().map(S=>({S,f:forecast(S)}));
+  const bl=Object.values(db.blocks),w0=weekStart(Date.now()),fc=planSpecies().map(S=>({S,f:forecast(S)}));
   const wk=liveHarvests().filter(h=>h.t>=w0),alerts=allAlerts(fc);
   $('dash').innerHTML=`${alerts.length?`<div class="card"><b>Needs attention</b>${alerts.slice(0,12).map(a=>`<div class="alert ${a.lvl||''}">${a.msg}</div>`).join('')}</div>`:'<div class="alert ok" style="margin-top:10px">Nothing overdue, no projected shortages.</div>'}
   <div class="card grid">
@@ -1092,7 +1097,7 @@ function allAlerts(fc){
 
 /* ================= forecasting ================= */
 function measured(S){
-  if(MS[S])return MS[S];const st=Object.values(db.blocks).filter(b=>speciesOf(b)===S).map(blockStats),closed=st.filter(s=>s.closed);
+  if(MS[S])return MS[S];const st=Object.values(db.blocks).filter(b=>{const bt=batchOf(b);return vMatch(S,bt.species||'Unknown',bt.strain)}).map(blockStats),closed=st.filter(s=>s.closed);
   const fN=n=>st.filter(s=>s.byF[n]!=null).map(s=>s.byF[n]);
   return MS[S]={y1:fN(1),y2:fN(2),y3:fN(3),incub:st.map(s=>s.incub).filter(x=>x!=null&&x>0),first:st.map(s=>s.toFirst).filter(x=>x!=null),between:st.flatMap(s=>s.betw),fail:closed.length?[closed.filter(s=>s.failed).length/closed.length*100]:[],failN:closed.length};
 }
@@ -1113,21 +1118,21 @@ function forecast(S){
   const bucket=(t,g,f)=>{const i=Math.round((weekStart(t)-w0)/(7*DAY));if(i>=0&&i<H)weeks[i][f]+=g};
   db.orders.filter(o=>o.species===S).forEach(o=>orderOcc(o,w0,w0+H*7*DAY).forEach(t=>bucket(t,+o.grams||0,o.additional?'addl':'normal')));
   weeks.forEach(w=>w.demand=(Math.max(w.target,w.normal)+w.addl)*(1+buf));
-  Object.values(db.blocks).filter(b=>speciesOf(b)===S&&b.stage!=='Closed').forEach(b=>{
+  Object.values(db.blocks).filter(b=>{const bt=batchOf(b);return b.stage!=='Closed'&&vMatch(S,bt.species||'Unknown',bt.strain)}).forEach(b=>{
     const ff=(b.stage==='Inoculated'||b.stage==='Incubating')?1-fail:1;let fl=b.flush,t;
     if(b.stage==='Inoculated'||b.stage==='Incubating')t=Math.max(now,blockInocT(b)+(incub+first)*DAY);
     else if(b.stage==='Fruiting'){const done=sum(blockHarvests(b.id).filter(h=>h.flush===fl).map(h=>h.grams)),rem=Math.max(0,(ys[fl-1]||0)-done);t=done>0?now:Math.max(now,(stageTime(b,'Fruiting')||now)+first*DAY);if(rem>0)bucket(t,rem,'existing');fl++;t+=betw*DAY}
     else t=Math.max(now,(stageTime(b,'Between flushes')||now)+betw*DAY);
     for(;fl<=3;fl++){const y=ys[fl-1]||0;if(y>0)bucket(t,y*ff,'existing');t+=betw*DAY}
   });
-  const y1e=(ys[0]||0)*(1-fail),lead1=(incub+first)*DAY,plans=[],flags=[];let stock=sum(db.spawn.filter(s=>s.species===S).map(s=>(s.remaining??s.qty)*1000));
+  const y1e=(ys[0]||0)*(1-fail),lead1=(incub+first)*DAY,plans=[],flags=[];let stock=sum(db.spawn.filter(s=>vMatch(S,s.species,s.strain)).map(s=>(s.remaining??s.qty)*1000));
   for(let i=0;i<H;i++){const w=weeks[i],gap=w.demand-w.existing-w.planned;if(gap<=1)continue;
     if(!(y1e>0)){flags.push(`${esc(S)}: no flush-1 yield set, so new blocks can't be planned`);break}
     const blocks=Math.ceil(gap/y1e),inoc=w.ws+2*DAY-lead1;
     if(inoc<t0){w.late=true;flags.push(`${esc(S)}, week of ${fmtDay(w.ws)}: short ${fmtW(gap)} and too late to inoculate (would have needed ${fmtDay(inoc)})`);continue}
     const p={S,week:w.ws,blocks,inoc,prep:inoc-DAY,spawn:inoc-L.spawnDays*DAY,culture:inoc-(+L.spawnDays+ +L.cultureDays)*DAY,spawnG:blocks*L.spawnPer,flags:[]};
     if(p.spawn<t0){if(stock>=p.spawnG)stock-=p.spawnG;else{p.flags.push('not enough spawn in stock and too late to make more');flags.push(`${esc(S)}: inoculating ${blocks} blocks by ${fmtDay(inoc)} needs ${r1(p.spawnG/1000)} kg spawn — only ${r1(stock/1000)} kg unallocated`);stock=0}}
-    else if(p.culture<t0&&!db.cultures.some(c=>c.species===S&&c.status!=='Retired')){p.flags.push('no active culture lot');flags.push(`${esc(S)}: spawn must start ${fmtDay(p.spawn)} but there is no active culture lot`)}
+    else if(p.culture<t0&&!db.cultures.some(c=>vMatch(S,c.species,c.strain)&&c.status!=='Retired')){p.flags.push('no active culture lot');flags.push(`${esc(S)}: spawn must start ${fmtDay(p.spawn)} but there is no active culture lot`)}
     plans.push(p);w.plan=p;let t=w.ws+2*DAY;for(let f=0;f<3;f++){if(ys[f]>0)bucket(t,blocks*ys[f]*(1-fail),'planned');t+=betw*DAY}
   }
   const cv=[P.y1,P.y2,P.y3].filter(p=>p.m&&p.sd!=null&&p.v>0).map(p=>p.sd/p.v),unc=cv.length?avg(cv):.3;
@@ -1142,7 +1147,10 @@ function capacityFlags(){
 }
 
 /* ================= planning ================= */
-function planSpecies(){const h=db.settings.planHidden||[];return speciesAll().filter(S=>!h.includes(S))}
+function planSpecies(){const h=db.settings.planHidden||[],keys=[...new Set([...Object.keys(db.targets),...Object.keys(db.lead),...db.orders.map(o=>o.species)].filter(Boolean))];
+  const strainKeyed=new Set(keys.filter(k=>vSplit(k).st!=null).map(k=>vSplit(k).sp.toLowerCase()));
+  Object.values(db.batches).forEach(b=>{if(b.species&&!strainKeyed.has(b.species.toLowerCase())&&!keys.some(k=>k.toLowerCase()===b.species.toLowerCase()))keys.push(b.species)});
+  return keys.filter(k=>!h.includes(k)&&!(vSplit(k).st==null&&strainKeyed.has(k.toLowerCase())&&!(db.targets[k]||db.lead[k]))).sort()}
 function addPlanVariety(){const sel=$('nv_sel').value,v=(sel==='__new'?$('nv').value:sel).trim();if(!v)return toast(sel==='__new'?'Type the variety name':'Choose a variety');
   db.settings.planHidden=(db.settings.planHidden||[]).filter(x=>x!==v);db.lead[v]=db.lead[v]||{};audit(`Planning: added ${v}`);save();renderPlanning()}
 function delPlanVariety(S){const no=db.orders.filter(o=>o.species===S).length;
@@ -1150,7 +1158,10 @@ function delPlanVariety(S){const no=db.orders.filter(o=>o.species===S).length;
   delete db.targets[S];delete db.lead[S];db.orders=db.orders.filter(o=>o.species!==S);
   const h=db.settings.planHidden||[];if(!h.includes(S))h.push(S);db.settings.planHidden=h;audit(`Planning: removed ${S}`);save();renderPlanning();toast(`${S} removed from planning`)}
 function planPicker(sp){const by={};db.strains.forEach(x=>{if(!x.species)return;(by[x.species]=by[x.species]||[]).push(x)});
-  const opts=Object.keys(by).filter(S=>!sp.includes(S)).sort().map(S=>`<option value="${esc(S)}">${esc(S)} — ${by[S].map(x=>esc(x.strain||'')+(x.genetics?' · '+esc(x.genetics):'')).filter(Boolean).join(', ')||'no strain name'}</option>`).join('');
+  const opts=Object.keys(by).sort().map(S=>{const named=by[S].filter(x=>x.strain).sort((a,c)=>a.strain.localeCompare(c.strain));
+    const o=named.filter(x=>!sp.includes(vKey(S,x.strain))).map(x=>`<option value="${esc(vKey(S,x.strain))}">${esc(S)} — ${esc(x.strain)}${x.genetics?' · '+esc(x.genetics):''}</option>`);
+    if(!sp.includes(S))o.push(`<option value="${esc(S)}">${esc(S)} — all strains together</option>`);
+    return o.length?`<optgroup label="${esc(S)}">${o.join('')}</optgroup>`:''}).join('');
   return `<select id="nv_sel" onchange="$('nv').style.display=this.value==='__new'?'':'none'"><option value="" selected disabled>Add a variety from your strains…</option>${opts}<option value="__new">+ Type a new variety…</option></select><input id="nv" placeholder="e.g. Lion's Mane" style="display:none">`}
 function renderPlanning(){
   const sp=planSpecies(),F=sp.map(S=>({S,f:forecast(S)})),cap=capacityFlags();
@@ -1166,7 +1177,8 @@ function renderPlanning(){
      <td class="small">${w.plan?`Culture ${fmtDay(w.plan.culture)} · Spawn ${fmtDay(w.plan.spawn)} (${r1(w.plan.spawnG/1000)} kg) · Substrate ${fmtDay(w.plan.prep)}`:''}</td></tr>`).join('')}</table></div></div>`).join('')||'<div class="card muted">Add a variety below (set a weekly target) to see a forecast.</div>'}
   <div class="card"><b>Weekly targets &amp; lead times per variety</b><p class="small muted">Lead times and yields here are starting assumptions. Once 3+ blocks have real data (5+ closed blocks for failure rate), measured averages replace them automatically.</p>
    <div class="scroll"><table><tr><th>Variety</th><th>Weekly target (${U()})</th><th>Incubation days</th><th>Fruit→1st harvest</th><th>Days between flushes</th><th>F1 / block (${U()})</th><th>F2</th><th>F3</th><th>Failure %</th><th>Spawn lead days</th><th>Culture lead days</th><th>Spawn per block (g)</th><th></th></tr>
-   ${sp.map(S=>{const L=lead(S),strs=db.strains.filter(x=>x.species===S).map(x=>x.strain).filter(Boolean);return `<tr><td><b>${esc(S)}</b>${strs.length?`<div class="small muted">${esc(strs.join(', '))}</div>`:''}</td><td><input data-sp="${esc(S)}" data-k="target" type="number" step="any" value="${wOut(db.targets[S]||0)}" style="width:80px" onchange="setPlan(this)"></td>
+   ${sp.map(S=>{const L=lead(S),v=vSplit(S),g=v.st!=null?(db.strains.find(x=>vMatch(S,x.species,x.strain))||{}).genetics:'',strs=v.st==null?db.strains.filter(x=>x.species===S).map(x=>x.strain).filter(Boolean):[];
+     return `<tr><td><b>${esc(v.sp)}</b>${v.st!=null?`<div>${esc(v.st)}${g?` <span class="small muted">· ${esc(g)}</span>`:''}</div>`:strs.length?`<div class="small muted">all strains: ${esc(strs.join(', '))}</div>`:''}</td><td><input data-sp="${esc(S)}" data-k="target" type="number" step="any" value="${wOut(db.targets[S]||0)}" style="width:80px" onchange="setPlan(this)"></td>
      ${['incub','first','between','y1','y2','y3','fail','spawnDays','cultureDays','spawnPer'].map(k=>`<td><input data-sp="${esc(S)}" data-k="${k}" type="number" step="any" value="${/^y\d/.test(k)?wOut(L[k]):L[k]}" style="width:72px" onchange="setPlan(this)"></td>`).join('')}<td><button class="chip" title="Remove from planning" onclick="delPlanVariety(${JSON.stringify(S).replace(/"/g,'&quot;')})">✕</button></td></tr>`}).join('')}</table></div>
    <div class="row">${planPicker(sp)}<button class="btn alt" onclick="addPlanVariety()">Add</button>
    <span class="muted small">Overall weekly target: <b>${fmtW(sum(Object.values(db.targets).map(Number)))}</b></span></div></div>
@@ -1189,24 +1201,27 @@ function pvaCard(){
 }
 
 /* ================= tasks ================= */
-function genTasks(){
-  const want={},t0=today0();
+/* Planned production, worked out fresh from Planning every time it is shown. It appears only on the
+   Weekly production tab — never on the task board. */
+function planWant(){
+  const want={},t0=today0(),room=t=>/Inoculate|substrate/i.test(t)?'lab':/fruiting/i.test(t)?'grow':/culture|spawn/i.test(t)?'lab':'';
+  const add=(k,w)=>{w.room=room(w.title);want[k]=w};
   planSpecies().forEach(S=>{const f=forecast(S);f.plans.forEach(p=>{const d=dstr(p.inoc),base=`${S}|${d}`;
-    if(p.spawn>=t0){want[base+'|culture']={title:`Begin culture work for ${S} (for ${p.blocks} blocks inoculating ${fmtDay(p.inoc)})`,due:p.culture,qty:'',pri:'normal'};
-    want[base+'|spawn']={title:`Prepare & inoculate ${r1(p.spawnG/1000)} kg ${S} spawn`,due:p.spawn,qty:r1(p.spawnG/1000)+' kg',pri:'normal'}}
-    else want[base+'|spawnstock']={title:`Set aside ${r1(p.spawnG/1000)} kg ${S} spawn from stock`,due:p.prep,qty:r1(p.spawnG/1000)+' kg',pri:'normal'};
-    want[base+'|substrate']={title:`Prepare substrate & sterilize ${p.blocks} ${S} blocks`,due:p.prep,qty:p.blocks+' blocks',pri:'high'};
-    want[base+'|inoc']={title:`Inoculate ${p.blocks} blocks of ${S}`,due:p.inoc,qty:p.blocks+' blocks',pri:'high'}})});
+    if(p.spawn>=t0){add(base+'|culture',{title:`Begin culture work for ${S} (for ${p.blocks} blocks inoculating ${fmtDay(p.inoc)})`,due:p.culture,qty:''});
+      add(base+'|spawn',{title:`Prepare & inoculate ${r1(p.spawnG/1000)} kg ${S} spawn`,due:p.spawn,qty:r1(p.spawnG/1000)+' kg'})}
+    else add(base+'|spawnstock',{title:`Set aside ${r1(p.spawnG/1000)} kg ${S} spawn from stock`,due:p.prep,qty:r1(p.spawnG/1000)+' kg'});
+    add(base+'|substrate',{title:`Prepare substrate & sterilize ${p.blocks} ${S} blocks`,due:p.prep,qty:p.blocks+' blocks'});
+    add(base+'|inoc',{title:`Inoculate ${p.blocks} blocks of ${S}`,due:p.inoc,qty:p.blocks+' blocks'})})});
   Object.values(db.batches).forEach(bt=>{const bl=batchBlocks(bt.id).filter(b=>b.stage==='Inoculated'||b.stage==='Incubating');if(!bl.length)return;
-    const ready=pdate(bt.inocDate)+param(bt.species,'incub').v*DAY;if(ready<=t0+2*DAY)want[`fruit|${bt.id}`]={title:`Move batch ${bt.id} (${bl.length} ${bt.species}) into fruiting`,due:ready,qty:bl.length+' blocks',pri:'high'}});
-  Object.entries(want).forEach(([key,w])=>{const ex=db.tasks.find(t=>t.key===key);
-    if(!ex)db.tasks.push({id:'a'+hashStr(key),key,auto:true,title:w.title,due:Math.max(w.due,0),qty:w.qty,pri:w.pri==='high'?'important':'todo',room:/Inoculate|substrate/i.test(w.title)?'lab':/fruiting/i.test(w.title)?'grow':/culture|spawn/i.test(w.title)?'lab':'',assignee:'',status:'open',created:Date.now(),planDue:w.due,hist:[]});
-    else if(ex.auto&&!ex.custom){ex.title=w.title;ex.qty=w.qty;ex.planDue=w.due;if(!ex.resched&&ex.status==='open')ex.due=w.due;if(ex.status==='cancelled'&&ex.autoCancel){ex.status='open';ex.autoCancel=false}}});
-  db.tasks.forEach(t=>{if(t.auto&&t.status==='open'&&!want[t.key]){t.status='cancelled';t.autoCancel=true;t.hist.push({t:Date.now(),msg:'No longer needed after re-forecast'})}});
-}
+    const ready=pdate(bt.inocDate)+param(vKey(bt.species,bt.strain)in db.lead?vKey(bt.species,bt.strain):bt.species,'incub').v*DAY;
+    if(ready<=t0+2*DAY)add(`fruit|${bt.id}`,{title:`Move batch ${bt.id} (${bl.length} ${bt.species}${bt.strain?' '+bt.strain:''}) into fruiting`,due:ready,qty:bl.length+' blocks'})});
+  return want}
+/* Older versions copied planned production onto the task board. Take those copies off it; any the
+   person edited by hand become ordinary tasks. */
+function genTasks(){if(!db.tasks.some(t=>t.auto))return;db.tasks.forEach(t=>{if(t.auto&&t.custom){t.auto=false;t.key=undefined}});db.tasks=db.tasks.filter(t=>!t.auto);save()}
 /* ================= task board =================
    Three lists: Do now (important + urgent), Important (schedule it), To do (when there's time).
-   Overdue tasks always show under Do now. Planning creates tasks automatically; anyone can add their own. */
+   Overdue tasks always show under Do now. Planned production lives on the Weekly production tab. */
 const TIERS=[['urgent','🔴 Do now','Important and needs doing right away'],['important','🟠 Important','Matters, but can be scheduled'],['todo','🟢 To do','Needs doing — not urgent or critical']];
 function tierOf(t,eff){const base=t.pri==='urgent'?'urgent':(t.pri==='important'||t.pri==='high')?'important':'todo';return eff&&t.status==='open'&&t.due&&t.due<today0()?'urgent':base}
 let taskF={who:'all',room:''};
@@ -1753,6 +1768,9 @@ const wkDone=(id,wk)=>db.weeklyDone.find(x=>x.id===id+'|'+wk);
 function wkToggle(id,wk){const ex=wkDone(id,wk),j=db.weekly.find(x=>x.id===id);
   if(ex)db.weeklyDone=db.weeklyDone.filter(x=>x!==ex);else db.weeklyDone.push({id:id+'|'+wk,tpl:id,wk,t:Date.now(),op:op()});
   audit(`Weekly: ${ex?'un-ticked':'done'} — ${j?j.title:''} (week of ${wk})`);save();renderWeekly()}
+function wkPlanToggle(i,wk){const x=(WK.items||[])[i];if(!x)return;const id='plan:'+x.key,ex=db.weeklyDone.find(d=>d.id===id);
+  if(ex)db.weeklyDone=db.weeklyDone.filter(d=>d!==ex);else db.weeklyDone.push({id,plan:true,key:x.key,wk,day:Math.floor((x.due-weekStart(x.due))/DAY),title:x.title,qty:x.qty,room:x.room,t:Date.now(),op:op()});
+  audit(`Weekly: ${ex?'un-ticked':'done'} — ${x.title}`);save();renderWeekly()}
 function wkForm(j){j=j||{};const rooms=Object.keys(ROLES).filter(k=>k!=='all');
   return `<div class="two"><label>Day<select id="wk_day">${WDAYS.map((d,i)=>`<option value="${i}" ${i===(j.day??0)?'selected':''}>${d}</option>`).join('')}</select></label>
     <label>Room<select id="wk_room"><option value="">Any room</option>${rooms.map(k=>`<option value="${k}" ${k===j.room?'selected':''}>${ROLES[k].icon} ${ROLES[k].name}</option>`).join('')}</select></label></div>
@@ -1771,15 +1789,18 @@ function wkDel(id){const j=db.weekly.find(x=>x.id===id);if(!j||!confirm(`Delete 
 function renderWeekly(){const el=$('weekly');if(!el)return;
   const ws=weekStart(Date.now())+WK.off*7*DAY,wk=dstr(ws),today=WK.off===0?(new Date().getDay()+6)%7:-1,me=op(),mine=WK.mine;
   const back=ROLE&&ROLE!=='all'?`<button class="btn alt" onclick="goHome()">← Back to ${ROLES[ROLE].name}</button>`:'';
-  const jobs=db.weekly.filter(j=>!mine||!j.who||j.who===me),plan=db.tasks.filter(t=>t.auto&&t.due>=ws&&t.due<ws+7*DAY);
-  const all=jobs.length+plan.length,done=jobs.filter(j=>wkDone(j.id,wk)).length+plan.filter(t=>t.status==='done').length;
+  const t0=today0(),want=planWant(),jobs=db.weekly.filter(j=>!mine||!j.who||j.who===me);
+  const plan=Object.entries(want).map(([key,w])=>({key,title:w.title,qty:w.qty,room:w.room,due:Math.max(w.due,t0),late:w.due<t0})).filter(x=>x.due>=ws&&x.due<ws+7*DAY);
+  db.weeklyDone.filter(x=>x.plan&&x.wk===wk&&!plan.some(p=>p.key===x.key)).forEach(x=>plan.push({key:x.key,title:x.title,qty:x.qty,room:x.room,due:ws+x.day*DAY,gone:true}));
+  plan.forEach(x=>x.done=db.weeklyDone.find(d=>d.id==='plan:'+x.key));WK.items=plan;
+  const all=jobs.length+plan.length,done=jobs.filter(j=>wkDone(j.id,wk)).length+plan.filter(x=>x.done).length;
   const col=i=>{const dj=jobs.filter(j=>j.day===i),dp=plan.filter(t=>Math.floor((t.due-ws)/DAY)===i).sort((a,b)=>a.due-b.due),d=ws+i*DAY;
     return `<div class="card" style="margin:0;${i===today?'border-color:var(--acc2)':''}"><div class="row" style="margin:0;justify-content:space-between"><b>${WDAYS[i]}${i===today?' · today':''}</b><span class="small muted">${fmtDay(d)}</span></div>
      ${dj.map(j=>{const x=wkDone(j.id,wk);return `<div style="display:flex;gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" style="width:22px;height:22px;flex:none" ${x?'checked':''} onchange="wkToggle('${j.id}','${wk}')">
        <div style="flex:1;${x?'opacity:.5;text-decoration:line-through':''}"><a href="#" style="color:var(--ink);text-decoration:none" onclick="wkEdit('${j.id}');return false">${esc(j.title)}</a>
        <div class="small muted">${[j.room&&ROLES[j.room]?ROLES[j.room].icon+' '+ROLES[j.room].name:'',j.who?'👤 '+esc(j.who):'',j.notes?esc(j.notes):'',x?'✓ '+esc(x.op||'')+' '+fmtDay(x.t):''].filter(Boolean).join(' · ')}</div></div></div>`}).join('')}
-     ${dp.map(t=>`<div style="display:flex;gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" style="width:22px;height:22px;flex:none" ${t.status==='done'?'checked':''} onchange="taskSet('${t.id}','status',this.checked?'done':'open');renderWeekly()">
-       <div style="flex:1;${t.status==='done'?'opacity:.5;text-decoration:line-through':''}">${esc(t.title)}<div class="small muted"><span class="tag">from Planning</span>${t.qty?' · '+esc(t.qty):''}</div></div></div>`).join('')}
+     ${dp.map(t=>`<div style="display:flex;gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" style="width:22px;height:22px;flex:none" ${t.done?'checked':''} onchange="wkPlanToggle(${WK.items.indexOf(t)},'${wk}')">
+       <div style="flex:1;${t.done?'opacity:.5;text-decoration:line-through':''}">${esc(t.title)}<div class="small muted">${[`<span class="tag">from Planning</span>`,t.late&&!t.done?'<span class="bad">overdue</span>':'',t.room&&ROLES[t.room]?ROLES[t.room].icon+' '+ROLES[t.room].name:'',t.qty?esc(t.qty):'',t.done?'✓ '+esc(t.done.op||'')+' '+fmtDay(t.done.t):''].filter(Boolean).join(' · ')}</div></div></div>`).join('')}
      ${!dj.length&&!dp.length?'<p class="small muted" style="margin:8px 0">Nothing set.</p>':''}
      <button class="chip" onclick="wkNew(${i})">+ Add</button></div>`};
   el.innerHTML=`<div class="row" style="justify-content:space-between;align-items:center">${back||'<span></span>'}
