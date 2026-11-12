@@ -1236,7 +1236,7 @@ function planWant(){
 /* The farm's production rhythm. Each kind of work has its own weekdays (0 = Monday):
    culture work (LC jars), substrate (pasteurization and inoculating spawn bags) and inoculation (blocks).
    Planned jobs are added up across varieties and put on the latest allowed day that still meets the plan. */
-const PLAN_ORDER=['culture','substrate','spawn','spawnstock','inoc','fruit'];
+const PLAN_ORDER=['culture','substrate','spawnprep','spawn','spawnstock','inoc','fruit'];
 const DAYKINDS={cul:{set:'cultureDays',def:[1],name:'Culture days'},sub:{set:'subDays',def:[0],name:'Substrate days'},inoc:{set:'inocDays',def:[2],name:'Inoculation days'}};
 const workDays=k=>{const d=db.settings[DAYKINDS[k].set];return Array.isArray(d)&&d.length?d:DAYKINDS[k].def};
 const subDays=()=>workDays('sub');
@@ -1254,19 +1254,19 @@ function setWorkDay(k,i,on){const d=workDays(k).filter(x=>x!==i);if(on)d.push(i)
 function weekPlan(ws){const t0=today0(),agg={},pl=n=>n===1?'':'s',bag=spawnRatio().lb;
   Object.entries(planWant()).forEach(([k,w])=>{
     if(w.type==='fruit'){const due=Math.max(w.due,t0);if(weekStart(due)===ws)agg[k]={key:k,type:'fruit',S:w.S,blocks:w.blocks,batch:w.batch,due,late:w.due<t0,parts:{}};return}
-    let due,late,s=null;
-    if(w.type==='inoc'||w.type==='substrate'||w.type==='spawnstock'){const x=inocSlot(w.inocDue||w.due);s=x.sub;due=w.type==='inoc'?x.inoc:x.sub;late=x.late}
-    else{const x=slotFor(w.type==='culture'?'cul':'sub',w.due);due=x.d;late=x.late}
-    if(weekStart(due)!==ws)return;
     /* one job per type and day, with every variety added together */
-    const key=`${w.type}|${dstr(due)}`,a=agg[key]=agg[key]||{key,type:w.type,blocks:0,bags:0,due,sub:s,late:false,parts:{}};
-    a.blocks+=w.blocks;a.bags+=w.bags;if(late)a.late=true;const pt=a.parts[w.S]=a.parts[w.S]||{blocks:0,bags:0};pt.blocks+=w.blocks;pt.bags+=w.bags});
+    const put=(type,due,s,late)=>{if(weekStart(due)!==ws)return;const key=`${type}|${dstr(due)}`,a=agg[key]=agg[key]||{key,type,blocks:0,bags:0,due,sub:s,late:false,parts:{}};
+      a.blocks+=w.blocks;a.bags+=w.bags;if(late)a.late=true;const pt=a.parts[w.S]=a.parts[w.S]||{blocks:0,bags:0};pt.blocks+=w.blocks;pt.bags+=w.bags};
+    if(w.type==='inoc'||w.type==='substrate'||w.type==='spawnstock'){const x=inocSlot(w.inocDue||w.due);put(w.type,w.type==='inoc'?x.inoc:x.sub,x.sub,x.late)}
+    /* spawn: make & sterilize the bags on a substrate day, inoculate them on the next inoculation day */
+    else if(w.type==='spawn'){const x=inocSlot(w.due);put('spawnprep',x.sub,x.sub,x.late);put('spawn',x.inoc,x.sub,x.late)}
+    else{const x=slotFor('cul',w.due);put(w.type,x.d,null,x.late)}});
   const out=Object.values(agg).map(a=>{if(a.type==='culture'){a.jars=0;Object.values(a.parts).forEach(pt=>{pt.jars=Math.ceil(pt.bags/bagsPerJar());a.jars+=pt.jars})}
-    a.title={culture:`Make ${a.jars} LC jar${pl(a.jars)} (for ${a.bags} spawn bag${pl(a.bags)})`,spawn:`Inoculate ${a.bags} spawn bag${pl(a.bags)} (${bag} lb): ${Object.entries(a.parts).map(([S,pt])=>pt.bags+' × '+S).join(', ')}`,
+    a.title={culture:`Make ${a.jars} LC jar${pl(a.jars)} (for ${a.bags} spawn bag${pl(a.bags)})`,spawnprep:`Make & sterilize ${a.bags} spawn bag${pl(a.bags)} (${bag} lb)`,spawn:`Inoculate ${a.bags} spawn bag${pl(a.bags)}: ${Object.entries(a.parts).map(([S,pt])=>pt.bags+' × '+S).join(', ')}`,
       spawnstock:`Set aside ${a.bags} spawn bag${pl(a.bags)} from stock (for ${a.blocks} blocks)`,substrate:`Pasteurize substrate for ${a.blocks} blocks`,
       inoc:`Set aside ${a.bags} spawn bag${pl(a.bags)} and inoculate ${a.blocks} blocks`,fruit:`Move batch ${a.batch} (${a.blocks} ${a.S}) into fruiting`}[a.type];
-    a.qty=a.type==='spawn'||a.type==='spawnstock'?a.bags+' bag'+pl(a.bags):a.blocks+' blocks';a.room={culture:'lab',spawn:'prep',spawnstock:'lab',substrate:'prep',inoc:'lab',fruit:'grow'}[a.type];
-    a.vars=Object.keys(a.parts);a.detail=a.vars.map(S=>`${S}: ${a.type==='culture'?a.parts[S].jars+' jar'+pl(a.parts[S].jars):a.type==='inoc'?a.parts[S].bags+' bag'+pl(a.parts[S].bags)+' → '+a.parts[S].blocks+' blocks':a.type==='spawn'||a.type==='spawnstock'?a.parts[S].bags+' bag'+pl(a.parts[S].bags):a.parts[S].blocks+' blocks'}`).join(' · ');
+    a.qty=a.type==='spawn'||a.type==='spawnprep'||a.type==='spawnstock'?a.bags+' bag'+pl(a.bags):a.blocks+' blocks';a.room={culture:'lab',spawnprep:'prep',spawn:'lab',spawnstock:'lab',substrate:'prep',inoc:'lab',fruit:'grow'}[a.type];
+    a.vars=Object.keys(a.parts);a.detail=a.vars.map(S=>`${S}: ${a.type==='culture'?a.parts[S].jars+' jar'+pl(a.parts[S].jars):a.type==='inoc'?a.parts[S].bags+' bag'+pl(a.parts[S].bags)+' → '+a.parts[S].blocks+' blocks':a.type==='spawn'||a.type==='spawnprep'||a.type==='spawnstock'?a.parts[S].bags+' bag'+pl(a.parts[S].bags):a.parts[S].blocks+' blocks'}`).join(' · ');
     if(a.type==='culture')a.qty=a.jars+' jar'+pl(a.jars);if(a.type==='spawn')a.detail='';return a});
   /* blocks of the planned varieties made this week fill the week's inoculation jobs, earliest first */
   const inocs=out.filter(x=>x.type==='inoc').sort((x,y)=>x.due-y.due);
